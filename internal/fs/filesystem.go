@@ -43,17 +43,20 @@ func LazyReadDirectory(path string) ([]types.FileEntry, error) {
 	result := make([]types.FileEntry, 0, len(entries))
 	for _, entry := range entries {
 		var size int64
+		var modTime time.Time
 		// 快速取得檔案大小 (在大多數作業系統中 DirEntry 已經快取了這項資訊，成本極低)
 		if info, err := entry.Info(); err == nil {
 			size = info.Size()
+			modTime = info.ModTime()
 		}
 
 		result = append(result, types.FileEntry{
-			Name:  entry.Name(),
-			Path:  filepath.Join(absPath, entry.Name()),
-			IsDir: entry.IsDir(),
-			Mode:  entry.Type().String(),
-			Size:  size,
+			Name:    entry.Name(),
+			Path:    filepath.Join(absPath, entry.Name()),
+			IsDir:   entry.IsDir(),
+			Mode:    entry.Type().String(),
+			Size:    size,
+			ModTime: modTime,
 		})
 	}
 
@@ -120,6 +123,7 @@ func ReadDirectory(path string) ([]types.FileEntry, error) {
 			Name:        entry.Name(),
 			Path:        filepath.Join(absPath, entry.Name()),
 			Size:        info.Size(),
+			ModTime:     info.ModTime(),
 			IsDir:       entry.IsDir(),
 			Mode:        info.Mode().String(),
 			IsSymlink:   isSymlink,

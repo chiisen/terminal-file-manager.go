@@ -38,3 +38,6 @@ go.work.sum
 *.log
 log.txt
 
+# gofm
+gofm
+gofm.*

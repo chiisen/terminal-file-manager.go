@@ -5,6 +5,8 @@
 
 高效能 Terminal 檔案管理器，使用 Go (Golang) 開發，提供鍵盤導向的檔案瀏覽、操作與管理能力。
 
+![Terminal_File_Manager](./images/Terminal_File_Manager.gif)
+
 ## 目標
 
 - 比 GUI 檔案總管更快

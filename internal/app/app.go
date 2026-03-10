@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"gofm/internal/fs"
 	"gofm/internal/git"
@@ -41,6 +42,9 @@ type AppState struct {
 
 	// Height 是終端機視窗的高度
 	Height int
+
+	// LastKeyTime 是上次按鍵的時間，用於防呆（避免按鈕沒放開連按）
+	LastKeyTime time.Time
 
 	// Entries 是目前目錄中的檔案列表
 	Entries []types.FileEntry
@@ -134,6 +138,13 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = msg.Width
 		m.Height = msg.Height
 	case tea.KeyMsg:
+		// 防呆檢查：避免按鈕沒放開連按（150ms 內不處理重複按鍵）
+		now := time.Now()
+		if now.Sub(m.LastKeyTime) < 150*time.Millisecond {
+			return m, nil
+		}
+		m.LastKeyTime = now
+
 		switch m.Mode {
 		case ModeNormal:
 			return m.handleNormalMode(msg)
@@ -179,6 +190,19 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 返回上一層 (h 或 left)
 	case "h", "left":
 		return m.handleBack()
+
+	// 選取/取消選取檔案 (space)
+	case " ":
+		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
+			entry := m.Entries[m.Cursor]
+			if m.Selected[entry.Path] {
+				delete(m.Selected, entry.Path)
+				m.StatusMessage = "Unselected: " + entry.Name
+			} else {
+				m.Selected[entry.Path] = true
+				m.StatusMessage = "Selected: " + entry.Name
+			}
+		}
 
 	// 檔案操作
 	case "d": // 刪除
@@ -541,10 +565,9 @@ func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
 	entry := m.Entries[m.Cursor]
 
 	if entry.IsDir {
-		// 進入子目錄
+		// 進入子目錄（保持選取狀態）
 		m.CurrentPath = entry.Path
 		m.Cursor = 0
-		m.Selected = make(map[string]bool)
 		m.PreviewActive = false
 		return m, m.loadDirectory
 	}
@@ -572,7 +595,6 @@ func (m *AppState) handleBack() (tea.Model, tea.Cmd) {
 
 	m.CurrentPath = parent
 	m.Cursor = 0
-	m.Selected = make(map[string]bool)
 	m.PreviewActive = false
 	return m, m.loadDirectory
 }
@@ -714,7 +736,7 @@ func (m *AppState) View() string {
 	if len(m.Entries) == 0 {
 		fileList = "(empty directory)"
 	} else {
-		fileList = ui.RenderFileList(m.Entries, m.Cursor, fileListWidth)
+		fileList = ui.RenderFileList(m.Entries, m.Cursor, m.Selected, fileListWidth, m.Height)
 	}
 
 	// 渲染預覽面板
@@ -746,7 +768,7 @@ func (m *AppState) View() string {
 	switch m.Mode {
 	case ModeNormal:
 		sortIndicator := fmt.Sprintf(" [%s %s]", m.SortBy, map[bool]string{true: "↑", false: "↓"}[m.SortAsc])
-		statusBar = "↑↓/kj: nav  Enter/l: open  h: parent  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  ctrl+c: quit"
+		statusBar = "↑↓/kj: nav  Enter/l: open  ←/h: parent  space: select  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  ctrl+c: quit"
 	case ModeInput:
 		switch m.StatusMessage {
 		case "newfile":
