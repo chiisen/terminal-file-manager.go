@@ -36,6 +36,12 @@ type AppState struct {
 	// CurrentPath 是目前瀏覽的目錄路徑
 	CurrentPath string
 
+	// Width 是終端機視窗的寬度
+	Width int
+
+	// Height 是終端機視窗的高度
+	Height int
+
 	// Entries 是目前目錄中的檔案列表
 	Entries []types.FileEntry
 
@@ -87,6 +93,8 @@ func New(startPath string) *AppState {
 
 	return &AppState{
 		CurrentPath:   absPath,
+		Width:        80,  // 預設寬度
+		Height:       24,  // 預設高度
 		Entries:       []types.FileEntry{},
 		Cursor:        0,
 		Selected:      make(map[string]bool),
@@ -121,6 +129,10 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.ErrorMessage = ""
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// 自動填滿視窗：更新寬度和高度
+		m.Width = msg.Width
+		m.Height = msg.Height
 	case tea.KeyMsg:
 		switch m.Mode {
 		case ModeNormal:
@@ -139,7 +151,7 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleNormalMode 處理一般導航模式的鍵盤輸入
 func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c", "q", "Q":
 		return m, tea.Quit
 
 	case "esc":
@@ -149,22 +161,23 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// 檔案導航
 	case "up", "k":
-		if m.Cursor > 0 {
+		if len(m.Entries) > 0 && m.Cursor > 0 {
 			m.Cursor--
 			m.PreviewActive = false
 		}
 	case "down", "j":
-		if m.Cursor < len(m.Entries)-1 {
+		if len(m.Entries) > 0 && m.Cursor < len(m.Entries)-1 {
 			m.Cursor++
 			m.PreviewActive = false
 		}
 
-	// 進入目錄 (Enter 或 l)
-	case "enter", "l":
+	// 進入目錄 (Enter, l 或 right)
+	case "enter", "l", "right":
+		m.StatusMessage = "Opening..."
 		return m.handleOpen()
 
-	// 返回上一層 (h)
-	case "h":
+	// 返回上一層 (h 或 left)
+	case "h", "left":
 		return m.handleBack()
 
 	// 檔案操作
@@ -520,7 +533,8 @@ func (m *AppState) HandleOpen() (tea.Model, tea.Cmd) {
 
 // handleOpen 處理進入目錄或開啟檔案的操作
 func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
-	if m.Cursor < 0 || m.Cursor >= len(m.Entries) {
+	// 防禦性檢查：確保有項目且游標在範圍內
+	if len(m.Entries) == 0 || m.Cursor < 0 || m.Cursor >= len(m.Entries) {
 		return m, nil
 	}
 
@@ -665,8 +679,9 @@ func (m *AppState) loadGitInfo() {
 // View 回傳目前狀態的 UI 渲染結果
 // 這個方法會在每次狀態更新後被呼叫
 func (m *AppState) View() string {
-	// 使用 UI 元件渲染各部分
-	pathBar := ui.RenderPathBar(m.CurrentPath, 60)
+	// 自動填滿視窗：計算可用寬度
+	// 路徑列使用完整寬度
+	pathBar := ui.RenderPathBar(m.CurrentPath, m.Width)
 
 	// 如果是 Git 倉庫，添加 Git 狀態資訊
 	var gitStatusInfo string
@@ -683,12 +698,23 @@ func (m *AppState) View() string {
 		}
 	}
 
+	// 自動填滿視窗：計算檔案列表和預覽區域的寬度
+	// 預覽區域佔 40%，檔案列表佔 60%
+	previewWidth := m.Width * 40 / 100
+	if previewWidth < 30 {
+		previewWidth = 30 // 最小寬度
+	}
+	fileListWidth := m.Width - previewWidth - 1 // -1 為分隔線
+	if fileListWidth < 30 {
+		fileListWidth = 30
+	}
+
 	// 渲染檔案列表
 	var fileList string
 	if len(m.Entries) == 0 {
 		fileList = "(empty directory)"
 	} else {
-		fileList = ui.RenderFileList(m.Entries, m.Cursor, 40)
+		fileList = ui.RenderFileList(m.Entries, m.Cursor, fileListWidth)
 	}
 
 	// 渲染預覽面板
@@ -720,7 +746,7 @@ func (m *AppState) View() string {
 	switch m.Mode {
 	case ModeNormal:
 		sortIndicator := fmt.Sprintf(" [%s %s]", m.SortBy, map[bool]string{true: "↑", false: "↓"}[m.SortAsc])
-		statusBar = "↑/k: up  ↓/j: down  Enter/l: open  h: parent  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  q: quit"
+		statusBar = "↑↓/kj: nav  Enter/l: open  h: parent  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  ctrl+c: quit"
 	case ModeInput:
 		switch m.StatusMessage {
 		case "newfile":
@@ -742,7 +768,7 @@ func (m *AppState) View() string {
 	// 組合輸出
 	output := pathBar + gitStatusInfo + "\n\n"
 	output += mainContent + "\n\n"
-	output += ui.RenderStatusBar(statusBar, 80)
+	output += ui.RenderStatusBar(statusBar, m.Width)
 
 	// 顯示錯誤/狀態訊息
 	if m.ErrorMessage != "" {

@@ -10,6 +10,16 @@ import (
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 💡 概念：ANSI Escape Code
+// 說明：用於控制終端機輸出的特殊字序列
+//       \033[2J 表示清除整個螢幕並將游標移到起始位置
+// 為何使用：確保程式全螢幕顯示前先清除舊的畫面殘留
+// ══════════════════════════════════════════════════════════════════════════════
+
+// clearScreen 是 ANSI escape code，用於清除終端機畫面
+const clearScreen = "\033[2J"
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 💡 概念：Bubble Tea
 // 說明：Go 語言的 TUI 框架，採用 MVC 模式（Model-View-Controller）
 //       - Model: 存放應用程式狀態 (AppState)
@@ -32,7 +42,11 @@ func main() {
 	}
 
 	// 初始化應用程式
-	p := tea.NewProgram(app.New(startPath))
+	// tea.WithAltScreen() 切換到替代螢幕緩衝區，實現全螢幕效果
+	p := tea.NewProgram(
+		app.New(startPath),
+		tea.WithAltScreen(),
+	)
 
 	// 執行應用程式
 	if _, err := p.Run(); err != nil {

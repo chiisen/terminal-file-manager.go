@@ -126,21 +126,40 @@ func RenderFileList(entries []types.FileEntry, cursor int, width int) string {
 }
 
 // RenderPathBar 渲染路徑列
+// 自動填滿視窗：使用 width 參數來決定顯示寬度
 func RenderPathBar(path string, width int) string {
+	// 確保最小寬度
+	if width < 10 {
+		width = 10
+	}
 	text := "PATH: " + path
 	if len(text) > width {
-		text = "..." + text[len(text)-width+3:]
+		// 從右側開始顯示，保留空間給 "PATH: "
+		pathStart := len("PATH: ")
+		availablePathWidth := width - pathStart - 3 // 3 個點
+		if availablePathWidth > 0 {
+			text = "PATH: ..." + path[len(path)-availablePathWidth:]
+		} else {
+			text = "PATH:"
+		}
 	}
-	return PathBarStyle.Render(text)
+	// 使用 Width() 確保填滿整行
+	return PathBarStyle.Width(width).Render(text)
 }
 
 // RenderStatusBar 渲染狀態列
+// 自動填滿視窗：使用 width 參數來決定顯示寬度
 func RenderStatusBar(message string, width int) string {
+	// 確保最小寬度
+	if width < 10 {
+		width = 10
+	}
 	text := message
 	if len(text) > width {
 		text = text[:width-3] + "..."
 	}
-	return StatusBarStyle.Render(text)
+	// 使用 Width() 確保填滿整行
+	return StatusBarStyle.Width(width).Render(text)
 }
 
 // RenderError 渲染錯誤訊息
