@@ -722,11 +722,12 @@ func (m *AppState) View() string {
 		sortIndicator := fmt.Sprintf(" [%s %s]", m.SortBy, map[bool]string{true: "↑", false: "↓"}[m.SortAsc])
 		statusBar = "↑/k: up  ↓/j: down  Enter/l: open  h: parent  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  q: quit"
 	case ModeInput:
-		if m.StatusMessage == "newfile" {
+		switch m.StatusMessage {
+		case "newfile":
 			statusBar = "New File - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
-		} else if m.StatusMessage == "newdir" {
+		case "newdir":
 			statusBar = "New Directory - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
-		} else {
+		default:
 			statusBar = "Rename - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
 		}
 	case ModeConfirmDelete:
