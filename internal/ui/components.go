@@ -3,8 +3,9 @@ package ui
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
 	"gofm/internal/types"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -28,15 +29,17 @@ var (
 	// SelectedStyle 選中項目的樣式
 	SelectedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ffffff")).
-			Background(lipgloss.Color("#16213e"))
+			Background(lipgloss.Color("#5e81ac")). // 北歐風格藍 (Nord Blue)
+			Bold(true)
 
 	// DirectoryStyle 目錄項目的樣式
 	DirectoryStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4fc3f7"))
+			Foreground(lipgloss.Color("#88c0d0")). // 冰藍色
+			Bold(true)
 
 	// FileStyle 檔案項目的樣式
 	FileStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#e0e0e0"))
+			Foreground(lipgloss.Color("#eceff4")) // 柔和雪白
 
 	// PreviewStyle 預覽區域的樣式
 	PreviewStyle = lipgloss.NewStyle().
@@ -70,13 +73,14 @@ func RenderFileList(entries []types.FileEntry, cursor int, width int) string {
 
 	output := ""
 	for i, entry := range entries {
-		// 決定前綴
+		// 決定前綴與游標
 		prefix := "  "
 		if i == cursor {
-			prefix = "> "
+			prefix = "▶ "
 		}
 
-		// 決定樣式
+		// 決定圖示與基本樣式
+		icon := "📄"
 		var lineStyle lipgloss.Style
 		if i == cursor {
 			lineStyle = SelectedStyle
@@ -86,24 +90,36 @@ func RenderFileList(entries []types.FileEntry, cursor int, width int) string {
 			lineStyle = FileStyle
 		}
 
-		// 類型標記
-		typeMark := " "
 		if entry.IsDir {
-			typeMark = "/"
+			icon = "📁"
 		}
 
-		// 大小
-		sizeStr := FormatSize(entry.Size)
-
-		// 組合行
-		line := fmt.Sprintf("%s%s %s %s", prefix, typeMark, entry.Name, sizeStr)
-
-		// 如果行太長，進行截斷
-		if len(line) > width-2 {
-			line = line[:width-5] + "..."
+		// 檔案大小格式化
+		sizeStr := ""
+		if !entry.IsDir {
+			sizeStr = FormatSize(entry.Size)
 		}
 
-		output += lineStyle.Render(line) + "\n"
+		// 排版計算：確保檔名過長時會被截斷，並讓 Size 欄位靠右對齊
+		maxNameLen := width - 22 // 預留給圖示、游標、Size、Padding 的空間
+		if maxNameLen < 10 {
+			maxNameLen = 10
+		}
+
+		nameStr := entry.Name
+		if len(nameStr) > maxNameLen {
+			nameStr = nameStr[:maxNameLen-3] + "..."
+		}
+
+		// %-*s 保證檔名區塊寬度固定，讓後方的 sizeStr 能整齊切齊
+		line := fmt.Sprintf("%s%s %-*s %9s ", prefix, icon, maxNameLen, nameStr, sizeStr)
+
+		// 若為選取狀態，讓背景色能覆蓋整行寬度
+		if i == cursor {
+			output += lineStyle.Width(width).Render(line) + "\n"
+		} else {
+			output += lineStyle.Render(line) + "\n"
+		}
 	}
 
 	return output
