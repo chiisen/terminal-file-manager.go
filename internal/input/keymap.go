@@ -55,8 +55,8 @@ type Keymap struct {
 // DefaultKeymap 回傳預設的鍵位映射
 func DefaultKeymap() *Keymap {
 	return &Keymap{
-		Up:      "k",
-		Down:    "j",
+		Up:      "up",
+		Down:    "down",
 		Open:    "l",
 		Back:    "h",
 		Delete:  "d",

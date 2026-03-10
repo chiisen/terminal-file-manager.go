@@ -64,13 +64,13 @@ type AppState struct {
 	IsCut bool
 
 	// Search 相關欄位
-	SearchQuery     string         // 搜尋關鍵字
-	SearchResults   []int          // 搜尋結果的索引列表
+	SearchQuery     string            // 搜尋關鍵字
+	SearchResults   []int             // 搜尋結果的索引列表
 	OriginalEntries []types.FileEntry // 搜尋前的原始列表
 
 	// Sort 相關欄位
-	SortBy     string // 排序方式: "name", "size", "modified", "type"
-	SortAsc    bool   // 是否升序排列
+	SortBy  string // 排序方式: "name", "size", "modified", "type"
+	SortAsc bool   // 是否升序排列
 
 	// Git 相關欄位
 	GitInfo *git.GitInfo // Git 倉庫資訊

@@ -27,8 +27,8 @@ const (
 
 // GitInfo 儲存 Git 資訊
 type GitInfo struct {
-	IsRepo    bool           // 是否為 Git 倉庫
-	RootPath  string         // Git 倉庫根目錄
+	IsRepo    bool                 // 是否為 Git 倉庫
+	RootPath  string               // Git 倉庫根目錄
 	StatusMap map[string]GitStatus // 檔案路徑對應的狀態
 }
 

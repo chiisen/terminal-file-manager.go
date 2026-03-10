@@ -112,11 +112,11 @@ func (c *RemoteClient) ReadDirectory(dirPath string) ([]types.FileEntry, error) 
 	for _, entry := range entries {
 		// sftp.FileInfo 已經實現了 os.FileInfo 介面，不需要再調用 Info()
 		result = append(result, types.FileEntry{
-			Name:    entry.Name(),
-			Path:    filepath.Join(dirPath, entry.Name()),
-			Size:    entry.Size(),
-			IsDir:   entry.IsDir(),
-			Mode:    entry.Mode().String(),
+			Name:  entry.Name(),
+			Path:  filepath.Join(dirPath, entry.Name()),
+			Size:  entry.Size(),
+			IsDir: entry.IsDir(),
+			Mode:  entry.Mode().String(),
 		})
 	}
 

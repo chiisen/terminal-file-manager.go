@@ -112,8 +112,8 @@ func TestIsImageExt(t *testing.T) {
 		{".md", false},
 		{".go", false},
 		{"", false},
-		{".JPG", true},  // 大寫
-		{".PNG", true},  // 大寫
+		{".JPG", true}, // 大寫
+		{".PNG", true}, // 大寫
 	}
 
 	for _, tt := range tests {
@@ -137,7 +137,7 @@ func TestDetectImageType(t *testing.T) {
 		{[]byte{'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P'}, "WebP"},
 		{[]byte{0x00, 0x00, 0x01, 0x00}, "ICO"},
 		{[]byte{0x00, 0x00, 0x02, 0x00}, "ICO"},
-		{[]byte{0x00, 0x00}, ""},            // 太短
+		{[]byte{0x00, 0x00}, ""},             // 太短
 		{[]byte{0xAA, 0xBB, 0xCC, 0xDD}, ""}, // 未知格式
 	}
 
@@ -157,10 +157,10 @@ func TestIsText(t *testing.T) {
 		{[]byte("Hello, World!"), true},
 		{[]byte("Line 1\nLine 2\nLine 3"), true},
 		{[]byte("Tab\tseparated\tvalues"), true},
-		{[]byte{0x00, 0x01, 0x02}, false},              // 包含 NULL
+		{[]byte{0x00, 0x01, 0x02}, false},               // 包含 NULL
 		{[]byte{0xFF, 0xFE, 0xFD}, false},               // 全是非可印字元
 		{[]byte("Hello\x00World"), false},               // 包含 NULL
-		{[]byte{}, true},                                 // 空內容視為文字
+		{[]byte{}, true},                                // 空內容視為文字
 		{[]byte("Test with 80% printable chars"), true}, // 高比例可印字元
 	}
 
