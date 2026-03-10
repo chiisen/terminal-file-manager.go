@@ -72,6 +72,9 @@ type AppState struct {
 	SortBy  string // 排序方式: "name", "size", "modified", "type"
 	SortAsc bool   // 是否升序排列
 
+	// 預覽狀態
+	PreviewActive bool
+
 	// Git 相關欄位
 	GitInfo *git.GitInfo // Git 倉庫資訊
 }
@@ -95,6 +98,7 @@ func New(startPath string) *AppState {
 		IsCut:         false,
 		SortBy:        "name",
 		SortAsc:       true,
+		PreviewActive: false,
 	}
 }
 
@@ -138,14 +142,21 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 
+	case "esc":
+		if m.PreviewActive {
+			m.PreviewActive = false
+		}
+
 	// 檔案導航
 	case "up", "k":
 		if m.Cursor > 0 {
 			m.Cursor--
+			m.PreviewActive = false
 		}
 	case "down", "j":
 		if m.Cursor < len(m.Entries)-1 {
 			m.Cursor++
+			m.PreviewActive = false
 		}
 
 	// 進入目錄 (Enter 或 l)
@@ -268,11 +279,13 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k": // 在搜尋結果中移動
 		if m.Cursor > 0 {
 			m.Cursor--
+			m.PreviewActive = false
 		}
 
 	case "down", "j": // 在搜尋結果中移動
 		if m.Cursor < len(m.SearchResults)-1 {
 			m.Cursor++
+			m.PreviewActive = false
 		}
 
 	default:
@@ -518,11 +531,13 @@ func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
 		m.CurrentPath = entry.Path
 		m.Cursor = 0
 		m.Selected = make(map[string]bool)
+		m.PreviewActive = false
 		return m, m.loadDirectory
 	}
 
-	// 如果是檔案，可以在这里扩展为打开文件操作
-	m.StatusMessage = "Opened: " + entry.Name
+	// 如果是檔案，啟動預覽並顯示訊息
+	m.PreviewActive = true
+	m.StatusMessage = "Previewing: " + entry.Name
 	return m, nil
 }
 
@@ -544,6 +559,7 @@ func (m *AppState) handleBack() (tea.Model, tea.Cmd) {
 	m.CurrentPath = parent
 	m.Cursor = 0
 	m.Selected = make(map[string]bool)
+	m.PreviewActive = false
 	return m, m.loadDirectory
 }
 
@@ -679,11 +695,17 @@ func (m *AppState) View() string {
 	var previewContent string
 	if len(m.Entries) > 0 && m.Cursor >= 0 && m.Cursor < len(m.Entries) {
 		entry := m.Entries[m.Cursor]
-		p, err := preview.GetPreview(entry.Path)
-		if err != nil {
-			previewContent = fmt.Sprintf("Error: %v", err)
+		if entry.IsDir {
+			previewContent = "Directory\n\n" + entry.Name
+		} else if !m.PreviewActive {
+			previewContent = "Preview\n\nPress Enter to view contents.\nPress Esc to hide."
 		} else {
-			previewContent = p.Content
+			p, err := preview.GetPreview(entry.Path)
+			if err != nil {
+				previewContent = fmt.Sprintf("Error: %v", err)
+			} else {
+				previewContent = p.Content
+			}
 		}
 	} else {
 		previewContent = "Preview\n\nSelect a file\nto preview"

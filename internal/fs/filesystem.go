@@ -42,11 +42,18 @@ func LazyReadDirectory(path string) ([]types.FileEntry, error) {
 	// 只讀取名稱，快速返回
 	result := make([]types.FileEntry, 0, len(entries))
 	for _, entry := range entries {
+		var size int64
+		// 快速取得檔案大小 (在大多數作業系統中 DirEntry 已經快取了這項資訊，成本極低)
+		if info, err := entry.Info(); err == nil {
+			size = info.Size()
+		}
+
 		result = append(result, types.FileEntry{
 			Name:  entry.Name(),
 			Path:  filepath.Join(absPath, entry.Name()),
 			IsDir: entry.IsDir(),
 			Mode:  entry.Type().String(),
+			Size:  size,
 		})
 	}
 
