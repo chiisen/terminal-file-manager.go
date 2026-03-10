@@ -3,6 +3,7 @@ package fs
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gofm/internal/types"
@@ -44,9 +45,13 @@ func TestGetParentDirectory(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := GetParentDirectory(tt.input)
-		if result != tt.expected {
-			t.Errorf("GetParentDirectory(%s) = %s; want %s", tt.input, result, tt.expected)
+		input := filepath.FromSlash(tt.input)
+		expected := filepath.FromSlash(tt.expected)
+		// special case for root dir on windows, filepath.Dir returns \ which ToSlash converts to /
+		result := GetParentDirectory(input)
+		if result != expected {
+			// On Windows, filepath.Dir("/") returns "\" which FromSlash gives "\"
+			t.Errorf("GetParentDirectory(%s) = %s; want %s", input, result, expected)
 		}
 	}
 }
@@ -269,7 +274,11 @@ func TestReadDirectoryWithSymlink(t *testing.T) {
 	// 建立一個符號連結
 	symlink := filepath.Join(tmpDir, "link")
 	if err := os.Symlink(testFile, symlink); err != nil {
-		t.Fatalf("Failed to create symlink: %v", err)
+		if runtime.GOOS == "windows" {
+			t.Skipf("Skipping symlink test on Windows due to privileges: %v", err)
+		} else {
+			t.Fatalf("Failed to create symlink: %v", err)
+		}
 	}
 
 	// 讀取目錄（包含符號連結）
@@ -290,7 +299,11 @@ func TestLazyReadDirectoryWithSymlink(t *testing.T) {
 	// 建立一個符號連結指向不存在的檔案
 	symlink := filepath.Join(tmpDir, "broken_link")
 	if err := os.Symlink("/nonexistent", symlink); err != nil {
-		t.Fatalf("Failed to create broken symlink: %v", err)
+		if runtime.GOOS == "windows" {
+			t.Skipf("Skipping broken symlink test on Windows due to privileges: %v", err)
+		} else {
+			t.Fatalf("Failed to create broken symlink: %v", err)
+		}
 	}
 
 	// 讀取目錄（包含損壞的符號連結）
