@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 
 	"gofm/internal/types"
 
@@ -64,9 +63,11 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 
 	// 建立 SSH 客戶端配置
 	sshConfig := &ssh.ClientConfig{
-		User:            config.User,
-		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // 、生產環境應該使用正確的 HostKeyCallback
+		User: config.User,
+		Auth: authMethods,
+		// ⚠️ 注意：InsecureIgnoreHostKey 會跳過主機金鑰驗證，僅適合測試/內網；
+		// 生產環境應改用 known_hosts 驗證的 HostKeyCallback
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
 	// 連接到 SSH 伺服器
@@ -111,9 +112,11 @@ func (c *RemoteClient) ReadDirectory(dirPath string) ([]types.FileEntry, error) 
 	result := make([]types.FileEntry, 0, len(entries))
 	for _, entry := range entries {
 		// sftp.FileInfo 已經實現了 os.FileInfo 介面，不需要再調用 Info()
+		// 💡 注意：遠端一律是 POSIX 路徑，必須用 path.Join；
+		// filepath.Join 在 Windows 會產生反斜線，導致遠端路徑錯誤
 		result = append(result, types.FileEntry{
 			Name:  entry.Name(),
-			Path:  filepath.Join(dirPath, entry.Name()),
+			Path:  path.Join(dirPath, entry.Name()),
 			Size:  entry.Size(),
 			IsDir: entry.IsDir(),
 			Mode:  entry.Mode().String(),

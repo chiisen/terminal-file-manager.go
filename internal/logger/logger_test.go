@@ -15,8 +15,12 @@ import (
 func TestGetLogPath(t *testing.T) {
 	path := GetLogPath()
 
-	// 檢查路徑格式
-	expectedPrefix := filepath.Join(os.Getenv("HOME"), ".config", "gofm")
+	// 檢查路徑格式（跨平台：UserHomeDir 優先，HOME 備援）
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
+	expectedPrefix := filepath.Join(home, ".config", "gofm")
 	if !strings.HasPrefix(path, expectedPrefix) {
 		t.Errorf("GetLogPath() = %s; want prefix %s", path, expectedPrefix)
 	}

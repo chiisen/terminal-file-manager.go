@@ -40,8 +40,8 @@
 ### Phase 6: 鍵位綁定系統 ✅
 
 - [x] 建立 `internal/input/keymap.go` 預設鍵位映射
-- [x] 建立 `internal/input/event.go` 事件處理
-- [x] 實現 config.toml 載入邏輯 (~/.config/gofm/config.toml) - 部分完成
+- [x] 事件處理（已合併至 `internal/input/keymap.go` + `internal/app/app.go`，無獨立 `event.go`）
+- [x] 實現 config.toml 載入邏輯 (~/.config/gofm/config.toml)
 
 ### Phase 7: 狀態機 ✅
 

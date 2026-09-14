@@ -25,8 +25,12 @@ func TestNewManager(t *testing.T) {
 func TestGetPluginsDir(t *testing.T) {
 	dir := GetPluginsDir()
 
-	// 檢查路徑格式
-	expectedPrefix := filepath.Join(os.Getenv("HOME"), ".config", "gofm", "plugins")
+	// 檢查路徑格式（跨平台：UserHomeDir 優先，HOME 備援）
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
+	expectedPrefix := filepath.Join(home, ".config", "gofm", "plugins")
 	if dir != expectedPrefix {
 		t.Errorf("GetPluginsDir() = %s; want %s", dir, expectedPrefix)
 	}

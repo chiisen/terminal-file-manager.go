@@ -137,17 +137,14 @@ paste = "p"
         app.go
 
       ui/
-        layout.go
-        renderer.go
-        components.go
+        components.go  // 樣式 + 列表/路徑列/狀態列渲染（原 layout.go / renderer.go 已合併至此）
 
       fs/
         filesystem.go
         operations.go
 
       input/
-        keymap.go
-        event.go
+        keymap.go  // 鍵位映射 + 事件處理（原 event.go 已合併至此與 app.go）
 
       state/
         state.go

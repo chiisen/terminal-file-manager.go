@@ -3,6 +3,8 @@ package input
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gofm/internal/app"
 
@@ -171,18 +173,135 @@ func (km *Keymap) ApplyAction(m *app.AppState, action KeyAction) (tea.Model, tea
 }
 
 // LoadKeymap 從配置檔載入鍵位映射
-// 目前，這只是一個簡單的實現，未來可以擴展為讀取 config.toml
+// 說明：讀取 ~/.config/gofm/config.toml 的 [keymap] 區段，未指定或缺檔時用預設值
+// 為何如此：避免缺檔或格式錯誤導致當機，保證鍵盤操作永遠可用
 func LoadKeymap() *Keymap {
-	// 檢查配置檔是否存在
-	configPath := os.Getenv("HOME") + "/.config/gofm/config.toml"
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// 配置檔不存在，使用預設值
+	// 💡 概念：os.UserHomeDir
+	// 說明：跨平台取得家目錄（Windows 用 USERPROFILE，Unix 用 HOME）
+	// 為何使用：原本只讀 HOME 在 Windows 會失效
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return DefaultKeymap()
 	}
+	configPath := filepath.Join(home, ".config", "gofm", "config.toml")
+	return LoadKeymapFromPath(configPath)
+}
 
-	// TODO: 實現從 TOML 檔案讀取配置
-	// 目前只返回預設值
-	return DefaultKeymap()
+// LoadKeymapFromPath 從指定路徑載入鍵位映射（方便測試）
+// 參數 path 是 config.toml 路徑
+// 檔案不存在或解析失敗時回傳預設值
+func LoadKeymapFromPath(path string) *Keymap {
+	km := DefaultKeymap()
+
+	// 檔案不存在直接用預設值
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return km
+	}
+
+	// 解析 [keymap] 區段並覆寫預設值
+	overrides := parseKeymapTOML(string(data))
+	applyKeymapOverrides(km, overrides)
+	return km
+}
+
+// parseKeymapTOML 解析 TOML 文字中的 [keymap] 區段
+// 說明：只用標準函式庫實作的最小解析器，支援 key = "value"、註解與單雙引號
+// 為何如此：config 格式單純，不需為此引入第三方 TOML 依賴
+func parseKeymapTOML(content string) map[string]string {
+	result := make(map[string]string)
+	inKeymap := false
+
+	for _, rawLine := range strings.Split(content, "\n") {
+		// 去除前後空白與 \r（Windows 換行）
+		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// 區段標頭，例如 [keymap]
+		if strings.HasPrefix(line, "[") {
+			section := strings.ToLower(strings.TrimSpace(line))
+			inKeymap = section == "[keymap]"
+			continue
+		}
+		if !inKeymap {
+			continue
+		}
+
+		// 只處理 key = value 形式
+		idx := strings.Index(line, "=")
+		if idx < 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:idx]))
+		value := strings.TrimSpace(line[idx+1:])
+
+		// 去除行尾註解（不在引號內才算註解）
+		value = stripInlineComment(value)
+		value = strings.TrimSpace(value)
+		// 去除前後單雙引號
+		value = unquote(value)
+		if key == "" || value == "" {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// stripInlineComment 去除 value 後方的行內註解（# 開頭，且不在引號內）
+func stripInlineComment(s string) string {
+	var quote rune
+	for i, r := range s {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote == 0 && (r == '"' || r == '\''):
+			quote = r
+		case quote == 0 && r == '#':
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// unquote 去除字串前後成對的單引號或雙引號
+func unquote(s string) string {
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
+// applyKeymapOverrides 將解析出的鍵位覆寫到 Keymap，未指定者維持預設
+func applyKeymapOverrides(km *Keymap, overrides map[string]string) {
+	// 💡 概念：map 查表覆寫
+	// 說明：用輔助函式避免重複的 if 判斷
+	// 為何使用：13 個欄位逐一處理時保持程式碼簡潔
+	set := func(key, current string) string {
+		if v, ok := overrides[key]; ok && v != "" {
+			return v
+		}
+		return current
+	}
+
+	km.Up = set("up", km.Up)
+	km.Down = set("down", km.Down)
+	km.Open = set("open", km.Open)
+	km.Back = set("back", km.Back)
+	km.Delete = set("delete", km.Delete)
+	km.Rename = set("rename", km.Rename)
+	km.Copy = set("copy", km.Copy)
+	km.Cut = set("cut", km.Cut)
+	km.Paste = set("paste", km.Paste)
+	km.NewFile = set("newfile", km.NewFile)
+	km.NewDir = set("newdir", km.NewDir)
+	km.Quit = set("quit", km.Quit)
+	km.Select = set("select", km.Select)
 }
 
 // String 回傳鍵位映射的字串表示

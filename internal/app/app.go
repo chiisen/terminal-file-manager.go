@@ -97,8 +97,8 @@ func New(startPath string) *AppState {
 
 	return &AppState{
 		CurrentPath:   absPath,
-		Width:        80,  // 預設寬度
-		Height:       24,  // 預設高度
+		Width:         80, // 預設寬度
+		Height:        24, // 預設高度
 		Entries:       []types.FileEntry{},
 		Cursor:        0,
 		Selected:      make(map[string]bool),

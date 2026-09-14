@@ -108,12 +108,19 @@ go test -cover ./...
 
 | 套件 | 涵蓋率 |
 |------|--------|
-| types | 100% |
-| logger | 83% |
-| plugin | 80% |
-| preview | 81% |
-| git | 85% |
-| fs | 81% |
+| types | 100.0% |
+| state | 100.0% |
+| git | 84.8% |
+| preview | 81.2% |
+| ui | 81.0% |
+| fs | 80.2% |
+| logger | 80.0% |
+| plugin | 78.6% |
+| input | 49.1% |
+| app | 29.5% |
+| remote | 28.1% |
+
+> 註：以 `go test -cover ./...`（go1.26.1）量測；app/input/remote 偏低主因是 Bubble Tea 互動迴圈與 SSH 實連需外部環境，純邏輯皆已覆蓋。
 
 ## 效能目標
 

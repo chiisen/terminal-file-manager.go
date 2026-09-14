@@ -38,7 +38,12 @@ func NewManager() *Manager {
 
 // GetPluginsDir 回傳外掛目錄路徑
 func GetPluginsDir() string {
-	home := os.Getenv("HOME")
+	// 💡 概念：os.UserHomeDir（跨平台家目錄，Windows 用 USERPROFILE）
+	// 為何使用：原本只讀 HOME 在 Windows 會是空字串，導致路徑錯誤
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
 	return filepath.Join(home, ".config", "gofm", "plugins")
 }
 

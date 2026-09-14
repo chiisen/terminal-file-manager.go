@@ -34,7 +34,12 @@ var defaultLogger *fileLogger
 // Init 初始化日誌系統
 func Init() error {
 	// 建立配置目錄
-	home := os.Getenv("HOME")
+	// 💡 概念：os.UserHomeDir（跨平台家目錄，Windows 用 USERPROFILE）
+	// 為何使用：原本只讀 HOME 在 Windows 會是空字串，導致路徑錯誤
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
 	configDir := filepath.Join(home, ".config", "gofm")
 
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -120,6 +125,9 @@ func Error(format string, args ...interface{}) {
 
 // GetLogPath 回傳日誌檔案路徑
 func GetLogPath() string {
-	home := os.Getenv("HOME")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
 	return filepath.Join(home, ".config", "gofm", "log.txt")
 }
