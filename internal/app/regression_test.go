@@ -167,7 +167,8 @@ func TestUnicodeNewFileThroughUpdate(t *testing.T) {
 	m := New(dir)
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("中文🙂.txt"), Paste: true})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(cmd())
 	if _, err := os.Stat(filepath.Join(dir, "中文🙂.txt")); err != nil {
 		t.Fatalf("快速輸入未建立 Unicode 檔案: %v", err)
 	}

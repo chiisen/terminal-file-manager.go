@@ -86,7 +86,16 @@ type AppState struct {
 	GitInfo *git.GitInfo // Git 倉庫資訊
 
 	// 載入編號可辨識同一路徑的不同請求，避免舊結果覆蓋新狀態。
-	loadID uint64
+	loadID                      uint64
+	previewID                   uint64
+	previewPath, previewContent string
+	previewLoading              bool
+	previewCacheEntry           types.FileEntry
+	previewCacheContent         string
+	previewCacheValid           bool
+	operationID                 uint64
+	operationBusy               bool
+	operationProgress           string
 }
 
 // 背景命令只回傳資料，所有畫面狀態由 Update 在事件迴圈內更新。
@@ -152,6 +161,10 @@ func (m *AppState) Init() tea.Cmd {
 // 參數 msg 是發生的事件（如鍵盤輸入）
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case previewLoadedMsg:
+		m.applyPreview(msg)
+	case operationFinishedMsg:
+		return m, m.finishOperation(msg)
 	case directoryLoadedMsg:
 		if msg.id != m.loadID || msg.path != m.CurrentPath {
 			return m, nil
@@ -225,25 +238,31 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleNormalMode 處理一般導航模式的鍵盤輸入
 func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.operationBusy {
+		switch msg.String() {
+		case "d", "r", "p", "a", "A":
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "ctrl+c", "q", "Q":
 		return m, tea.Quit
 
 	case "esc":
 		if m.PreviewActive {
-			m.PreviewActive = false
+			m.hidePreview()
 		}
 
 	// 檔案導航
 	case "up", "k":
 		if len(m.Entries) > 0 && m.Cursor > 0 {
 			m.Cursor--
-			m.PreviewActive = false
+			m.hidePreview()
 		}
 	case "down", "j":
 		if len(m.Entries) > 0 && m.Cursor < len(m.Entries)-1 {
 			m.Cursor++
-			m.PreviewActive = false
+			m.hidePreview()
 		}
 
 	// 進入目錄 (Enter, l 或 right)
@@ -311,10 +330,12 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// 排序功能
 	case "s": // 切換排序方向
+		m.hidePreview()
 		m.SortAsc = !m.SortAsc
 		m.SortEntries()
 		m.StatusMessage = fmt.Sprintf("Sorted by %s (%s)", m.SortBy, map[bool]string{true: "asc", false: "desc"}[m.SortAsc])
 	case "S": // 切換排序方式
+		m.hidePreview()
 		m.cycleSortBy()
 		m.SortEntries()
 		m.StatusMessage = fmt.Sprintf("Sorted by %s (%s)", m.SortBy, map[bool]string{true: "asc", false: "desc"}[m.SortAsc])
@@ -382,13 +403,13 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up": // 在搜尋結果中移動
 		if m.Cursor > 0 {
 			m.Cursor--
-			m.PreviewActive = false
+			m.hidePreview()
 		}
 
 	case "down": // 在搜尋結果中移動
 		if m.Cursor < len(m.SearchResults)-1 {
 			m.Cursor++
-			m.PreviewActive = false
+			m.hidePreview()
 		}
 
 	default:
@@ -403,6 +424,7 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // performSearch 執行 fuzzy search
 func (m *AppState) performSearch() {
+	m.hidePreview()
 	if m.SearchQuery == "" {
 		m.SearchResults = nil
 		m.Entries = m.OriginalEntries
@@ -558,6 +580,9 @@ func getExt(filename string) string {
 
 // handleInputSubmit 處理輸入模式下的 Enter 鍵
 func (m *AppState) handleInputSubmit() (tea.Model, tea.Cmd) {
+	if m.operationBusy {
+		return m, nil
+	}
 	if m.InputBuffer == "" {
 		m.Mode = ModeNormal
 		return m, nil
@@ -566,54 +591,40 @@ func (m *AppState) handleInputSubmit() (tea.Model, tea.Cmd) {
 	// 根據上一個操作的上下文來決定要執行的操作
 	// 這裡我們需要記住是新增檔案還是重新命名
 	// 暫時用 StatusMessage 來傳遞上下文
+	name := m.InputBuffer
+	var cmd tea.Cmd
 	if m.StatusMessage == "newfile" {
 		// 新增檔案
 		newPath := filepath.Join(m.CurrentPath, m.InputBuffer)
-		err := fs.CreateFile(newPath)
-		if err != nil {
-			m.ErrorMessage = err.Error()
-		} else {
-			m.StatusMessage = "Created file: " + m.InputBuffer
-		}
+		cmd = m.startOperation("Creating file: "+name, "Created file: "+name, "", false, func() error { return fs.CreateFile(newPath) })
 	} else if m.StatusMessage == "newdir" {
 		// 新增目錄
 		newPath := filepath.Join(m.CurrentPath, m.InputBuffer)
-		err := fs.CreateDirectory(newPath)
-		if err != nil {
-			m.ErrorMessage = err.Error()
-		} else {
-			m.StatusMessage = "Created directory: " + m.InputBuffer
-		}
+		cmd = m.startOperation("Creating directory: "+name, "Created directory: "+name, "", false, func() error { return fs.CreateDirectory(newPath) })
 	} else if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
 		// 重新命名
 		oldPath := m.Entries[m.Cursor].Path
-		err := fs.RenameFile(oldPath, m.InputBuffer)
-		if err != nil {
-			m.ErrorMessage = err.Error()
-		} else {
-			m.StatusMessage = "Renamed to: " + m.InputBuffer
-		}
+		cmd = m.startOperation("Renaming: "+name, "Renamed to: "+name, oldPath, false, func() error { return fs.RenameFile(oldPath, name) })
 	}
 
 	m.Mode = ModeNormal
 	m.InputBuffer = ""
-	return m, m.loadDirectory()
+	return m, cmd
 }
 
 // handleDeleteConfirm 處理確認刪除
 func (m *AppState) handleDeleteConfirm() (tea.Model, tea.Cmd) {
+	if m.operationBusy {
+		return m, nil
+	}
+	var cmd tea.Cmd
 	if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
 		entry := m.Entries[m.Cursor]
-		err := fs.DeleteFile(entry.Path)
-		if err != nil {
-			m.ErrorMessage = err.Error()
-		} else {
-			m.StatusMessage = "Deleted: " + entry.Name
-		}
+		cmd = m.startOperation("Deleting: "+entry.Name, "Deleted: "+entry.Name, entry.Path, false, func() error { return fs.DeleteFile(entry.Path) })
 	}
 
 	m.Mode = ModeNormal
-	return m, m.loadDirectory()
+	return m, cmd
 }
 
 // HandleOpen 處理進入目錄或開啟檔案的操作（公開版本）
@@ -634,14 +645,13 @@ func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
 		// 進入子目錄（保持選取狀態）
 		m.CurrentPath = entry.Path
 		m.Cursor = 0
-		m.PreviewActive = false
+		m.hidePreview()
 		return m, m.loadDirectory()
 	}
 
 	// 如果是檔案，啟動預覽並顯示訊息
-	m.PreviewActive = true
 	m.StatusMessage = "Previewing: " + entry.Name
-	return m, nil
+	return m, m.startPreview(entry, preview.GetPreview)
 }
 
 // HandleBack 返回上一層目錄（公開版本）
@@ -661,7 +671,7 @@ func (m *AppState) handleBack() (tea.Model, tea.Cmd) {
 
 	m.CurrentPath = parent
 	m.Cursor = 0
-	m.PreviewActive = false
+	m.hidePreview()
 	return m, m.loadDirectory()
 }
 
@@ -672,6 +682,9 @@ func (m *AppState) HandlePaste() (tea.Model, tea.Cmd) {
 
 // handlePaste 處理貼上操作
 func (m *AppState) handlePaste() (tea.Model, tea.Cmd) {
+	if m.operationBusy {
+		return m, nil
+	}
 	if m.Clipboard == "" {
 		m.ErrorMessage = "Clipboard is empty"
 		return m, nil
@@ -681,33 +694,20 @@ func (m *AppState) handlePaste() (tea.Model, tea.Cmd) {
 	filename := filepath.Base(m.Clipboard)
 	destPath := filepath.Join(m.CurrentPath, filename)
 
-	// 檢查目標是否已存在
-	if fs.FileExists(destPath) {
-		m.ErrorMessage = "File already exists: " + filename
-		return m, nil
+	source, isCut := m.Clipboard, m.IsCut
+	progress, success := "Copying: "+filename, "Copied: "+filename
+	if isCut {
+		progress, success = "Moving: "+filename, "Moved: "+filename
 	}
-
-	// 執行複製或移動
-	var err error
-	if m.IsCut {
-		err = fs.MoveFile(m.Clipboard, destPath)
-		m.Clipboard = ""
-		m.IsCut = false
-	} else {
-		err = fs.CopyFile(m.Clipboard, destPath)
-	}
-
-	if err != nil {
-		m.ErrorMessage = err.Error()
-	} else {
-		if m.IsCut {
-			m.StatusMessage = "Moved: " + filename
-		} else {
-			m.StatusMessage = "Copied: " + filename
+	return m, m.startOperation(progress, success, source, isCut, func() error {
+		if fs.FileExists(destPath) {
+			return fmt.Errorf("File already exists: %s", filename)
 		}
-	}
-
-	return m, m.loadDirectory()
+		if isCut {
+			return fs.MoveFile(source, destPath)
+		}
+		return fs.CopyFile(source, destPath)
+	})
 }
 
 // loadDirectory 載入目前目錄的檔案列表
@@ -719,7 +719,8 @@ func (m *AppState) loadDirectory() tea.Cmd {
 	// 載入期間清除舊項目，避免新路徑下仍能操作上一個目錄的檔案。
 	m.Entries = nil
 	m.Cursor = 0
-	m.PreviewActive = false
+	m.hidePreview()
+	m.previewCacheValid = false
 	m.GitInfo = nil
 	m.OriginalEntries = nil
 	m.SearchResults = nil
@@ -793,15 +794,12 @@ func (m *AppState) View() string {
 		entry := m.Entries[m.Cursor]
 		if entry.IsDir {
 			previewContent = "Directory\n\n" + entry.Name
-		} else if !m.PreviewActive {
+		} else if !m.PreviewActive || m.previewPath != entry.Path {
 			previewContent = "Preview\n\nPress Enter to view contents.\nPress Esc to hide."
+		} else if m.previewLoading {
+			previewContent = "Loading preview..."
 		} else {
-			p, err := preview.GetPreview(entry.Path)
-			if err != nil {
-				previewContent = fmt.Sprintf("Error: %v", err)
-			} else {
-				previewContent = p.Content
-			}
+			previewContent = m.previewContent
 		}
 	} else {
 		previewContent = "Preview\n\nSelect a file\nto preview"
@@ -846,6 +844,9 @@ func (m *AppState) View() string {
 	}
 	if m.StatusMessage != "" && m.Mode == ModeNormal && m.StatusMessage != "newfile" && m.StatusMessage != "newdir" {
 		output += "\n" + ui.RenderStatusMessage(m.StatusMessage)
+	}
+	if m.operationBusy {
+		output += "\n" + ui.RenderStatusMessage(m.operationProgress)
 	}
 
 	return output

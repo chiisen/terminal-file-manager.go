@@ -223,7 +223,8 @@ func TestHandleInputSubmit_NewFile(t *testing.T) {
 	m.InputBuffer = "created.txt"
 	m.Mode = ModeInput
 
-	m.handleInputSubmit()
+	_, cmd := m.handleInputSubmit()
+	m.Update(cmd())
 	if _, err := os.Stat(filepath.Join(tmp, "created.txt")); err != nil {
 		t.Errorf("應建立新檔案，err=%v", err)
 	}
@@ -239,7 +240,8 @@ func TestHandleInputSubmit_NewDir(t *testing.T) {
 	m.InputBuffer = "newfolder"
 	m.Mode = ModeInput
 
-	m.handleInputSubmit()
+	_, cmd := m.handleInputSubmit()
+	m.Update(cmd())
 	info, err := os.Stat(filepath.Join(tmp, "newfolder"))
 	if err != nil || !info.IsDir() {
 		t.Errorf("應建立新目錄，err=%v", err)
