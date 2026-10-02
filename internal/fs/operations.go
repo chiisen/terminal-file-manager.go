@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -54,6 +55,21 @@ func RenameFile(oldPath, newName string) error {
 // 參數 src 是來源檔案路徑
 // 參數 dst 是目標檔案路徑
 func CopyFile(src, dst string) error {
+	sourceInfo, err := os.Lstat(src)
+	if err != nil {
+		return fmt.Errorf("無法讀取來源: %w", err)
+	}
+	// 符號連結保留為連結，避免遞迴追蹤目錄連結形成循環。
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, dst)
+	}
+	if err := validateCopyPaths(src, dst, sourceInfo); err != nil {
+		return err
+	}
 	// 開啟來源檔案
 	sourceFile, err := os.Open(src)
 	if err != nil {
@@ -62,7 +78,7 @@ func CopyFile(src, dst string) error {
 	defer sourceFile.Close()
 
 	// 取得來源檔案資訊
-	sourceInfo, err := sourceFile.Stat()
+	sourceInfo, err = sourceFile.Stat()
 	if err != nil {
 		return err
 	}
@@ -86,6 +102,67 @@ func CopyFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// 寫入前解析實體路徑，阻擋自身、硬連結及透過連結指向的子目錄。
+func validateCopyPaths(src, dst string, sourceInfo os.FileInfo) error {
+	srcPath, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	srcPath, err = filepath.Abs(srcPath)
+	if err != nil {
+		return err
+	}
+	dstPath, err := resolvedDestination(dst)
+	if err != nil {
+		return err
+	}
+	if dstInfo, err := os.Stat(dst); err == nil {
+		if os.SameFile(sourceInfo, dstInfo) {
+			return fmt.Errorf("不可複製到來源本身: %s", dst)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	rel, err := filepath.Rel(srcPath, dstPath)
+	// 不同磁碟沒有相對路徑，也不會是來源的子目錄。
+	if err == nil && (rel == "." || (sourceInfo.IsDir() && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))) {
+		return fmt.Errorf("不可複製到來源本身或其子目錄: %s", dst)
+	}
+	return nil
+}
+
+// 目的地可能尚未存在：解析最接近的既有祖先，再接回未建立的部分。
+func resolvedDestination(dst string) (string, error) {
+	absPath, err := filepath.Abs(dst)
+	if err != nil {
+		return "", err
+	}
+	current := absPath
+	var missing []string
+	for {
+		_, err := os.Lstat(current)
+		if err == nil {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 // copyDirectory 遞迴複製目錄
@@ -113,16 +190,10 @@ func copyDirectory(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
-		if entry.IsDir() {
-			err = copyDirectory(srcPath, dstPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			err = CopyFile(srcPath, dstPath)
-			if err != nil {
-				return err
-			}
+		// 子目錄同樣經過路徑防護，避免既有目的地連結指回來源。
+		err = CopyFile(srcPath, dstPath)
+		if err != nil {
+			return err
 		}
 	}
 

@@ -11,6 +11,12 @@
 
 ### 修正
 
+- 修正目錄、詳細資訊與 Git 的非同步載入：背景命令回傳完成訊息，由事件迴圈更新狀態；以請求編號忽略過期結果，依路徑匹配 metadata 並保留搜尋與游標狀態（#1）。
+- 複製前阻擋來源自身、硬連結及來源子目錄，解析目的地祖先的符號連結；複製來源符號連結時保留連結，避免遞迴循環與來源截斷（#2）。
+- 修正中文及 emoji 的文字辨識、控制字元清理與預覽截斷，保留有效 UTF-8 內容（#3）。
+- 移除會遺失快速輸入的全域按鍵節流，支援 Unicode、多字元貼上與按字元退格；搜尋模式的 `j/k` 改為查詢字元（#4）。
+- 新增非同步載入、過期結果、複製路徑防護與 Unicode 的回歸測試。
+
 - Windows 相容性：`internal/plugin/plugin.go`、`internal/logger/logger.go`（含測試）由 `os.Getenv("HOME")` 改為 `os.UserHomeDir()` 優先、`HOME` 備援。
 - 遠端路徑：`internal/remote/remote.go` 遠端拼接由 `filepath.Join` 改為 `path.Join`（POSIX 語義）；修正 `InsecureIgnoreHostKey` 註解錯字並加註生產環境警告。
 

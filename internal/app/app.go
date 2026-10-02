@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"time"
+	"unicode/utf8"
 
 	"gofm/internal/fs"
 	"gofm/internal/git"
@@ -42,9 +42,6 @@ type AppState struct {
 
 	// Height 是終端機視窗的高度
 	Height int
-
-	// LastKeyTime 是上次按鍵的時間，用於防呆（避免按鈕沒放開連按）
-	LastKeyTime time.Time
 
 	// Entries 是目前目錄中的檔案列表
 	Entries []types.FileEntry
@@ -87,6 +84,31 @@ type AppState struct {
 
 	// Git 相關欄位
 	GitInfo *git.GitInfo // Git 倉庫資訊
+
+	// 載入編號可辨識同一路徑的不同請求，避免舊結果覆蓋新狀態。
+	loadID uint64
+}
+
+// 背景命令只回傳資料，所有畫面狀態由 Update 在事件迴圈內更新。
+type directoryLoadedMsg struct {
+	id      uint64
+	path    string
+	entries []types.FileEntry
+	err     error
+}
+
+type metadataLoadedMsg struct {
+	id      uint64
+	path    string
+	entries []types.FileEntry
+	err     error
+}
+
+type gitLoadedMsg struct {
+	id   uint64
+	path string
+	info *git.GitInfo
+	err  error
 }
 
 // New 建立並回傳一個新的 AppState
@@ -123,27 +145,69 @@ func (m *AppState) SetMode(mode AppMode) {
 // 用於初始化程式並回傳初始命令（通常是 nil，表示不執行額外命令）
 func (m *AppState) Init() tea.Cmd {
 	// 載入目錄內容
-	return m.loadDirectory
+	return m.loadDirectory()
 }
 
 // Update 處理輸入事件並回傳新的 Model 和 Command
 // 參數 msg 是發生的事件（如鍵盤輸入）
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 清除錯誤訊息
-	m.ErrorMessage = ""
-
 	switch msg := msg.(type) {
+	case directoryLoadedMsg:
+		if msg.id != m.loadID || msg.path != m.CurrentPath {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ErrorMessage = "Error loading directory: " + msg.err.Error()
+			return m, nil
+		}
+		m.Entries = msg.entries
+		m.SortEntries()
+		if m.Mode == ModeSearch {
+			m.OriginalEntries = m.Entries
+			m.performSearch()
+		}
+		return m, loadMetadata(msg.path, msg.id)
+	case metadataLoadedMsg:
+		if msg.id != m.loadID || msg.path != m.CurrentPath {
+			return m, nil
+		}
+		if msg.err == nil {
+			// 用路徑匹配而非索引，避免排序或目錄異動造成 metadata 錯配。
+			byPath := make(map[string]types.FileEntry, len(msg.entries))
+			for _, entry := range msg.entries {
+				byPath[entry.Path] = entry
+			}
+			// 搜尋列表與原始列表都需更新，Esc 還原時才不會遺失 metadata。
+			for _, entries := range [][]types.FileEntry{m.Entries, m.OriginalEntries} {
+				for i, entry := range entries {
+					if metadata, ok := byPath[entry.Path]; ok {
+						entries[i] = metadata
+					}
+				}
+			}
+			var selectedPath string
+			if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
+				selectedPath = m.Entries[m.Cursor].Path
+			}
+			m.SortEntries()
+			for i, entry := range m.Entries {
+				if entry.Path == selectedPath {
+					m.Cursor = i
+					break
+				}
+			}
+		}
+		return m, loadGitInfo(msg.path, msg.id)
+	case gitLoadedMsg:
+		if msg.id == m.loadID && msg.path == m.CurrentPath && msg.err == nil {
+			m.GitInfo = msg.info
+		}
 	case tea.WindowSizeMsg:
 		// 自動填滿視窗：更新寬度和高度
 		m.Width = msg.Width
 		m.Height = msg.Height
 	case tea.KeyMsg:
-		// 防呆檢查：避免按鈕沒放開連按（150ms 內不處理重複按鍵）
-		now := time.Now()
-		if now.Sub(m.LastKeyTime) < 150*time.Millisecond {
-			return m, nil
-		}
-		m.LastKeyTime = now
+		m.ErrorMessage = ""
 
 		switch m.Mode {
 		case ModeNormal:
@@ -268,12 +332,13 @@ func (m *AppState) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.InputBuffer = ""
 	case "backspace":
 		if len(m.InputBuffer) > 0 {
-			m.InputBuffer = m.InputBuffer[:len(m.InputBuffer)-1]
+			_, size := utf8.DecodeLastRuneInString(m.InputBuffer)
+			m.InputBuffer = m.InputBuffer[:len(m.InputBuffer)-size]
 		}
 	default:
 		// 處理一般字元輸入
-		if len(msg.String()) == 1 {
-			m.InputBuffer += msg.String()
+		if msg.Type == tea.KeyRunes {
+			m.InputBuffer += string(msg.Runes)
 		}
 	}
 	return m, nil
@@ -309,17 +374,18 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "backspace": // 刪除字元
 		if len(m.SearchQuery) > 0 {
-			m.SearchQuery = m.SearchQuery[:len(m.SearchQuery)-1]
+			_, size := utf8.DecodeLastRuneInString(m.SearchQuery)
+			m.SearchQuery = m.SearchQuery[:len(m.SearchQuery)-size]
 			m.performSearch()
 		}
 
-	case "up", "k": // 在搜尋結果中移動
+	case "up": // 在搜尋結果中移動
 		if m.Cursor > 0 {
 			m.Cursor--
 			m.PreviewActive = false
 		}
 
-	case "down", "j": // 在搜尋結果中移動
+	case "down": // 在搜尋結果中移動
 		if m.Cursor < len(m.SearchResults)-1 {
 			m.Cursor++
 			m.PreviewActive = false
@@ -327,8 +393,8 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	default:
 		// 處理一般字元輸入
-		if len(msg.String()) == 1 {
-			m.SearchQuery += msg.String()
+		if msg.Type == tea.KeyRunes {
+			m.SearchQuery += string(msg.Runes)
 			m.performSearch()
 		}
 	}
@@ -531,7 +597,7 @@ func (m *AppState) handleInputSubmit() (tea.Model, tea.Cmd) {
 
 	m.Mode = ModeNormal
 	m.InputBuffer = ""
-	return m, m.loadDirectory
+	return m, m.loadDirectory()
 }
 
 // handleDeleteConfirm 處理確認刪除
@@ -547,7 +613,7 @@ func (m *AppState) handleDeleteConfirm() (tea.Model, tea.Cmd) {
 	}
 
 	m.Mode = ModeNormal
-	return m, m.loadDirectory
+	return m, m.loadDirectory()
 }
 
 // HandleOpen 處理進入目錄或開啟檔案的操作（公開版本）
@@ -569,7 +635,7 @@ func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
 		m.CurrentPath = entry.Path
 		m.Cursor = 0
 		m.PreviewActive = false
-		return m, m.loadDirectory
+		return m, m.loadDirectory()
 	}
 
 	// 如果是檔案，啟動預覽並顯示訊息
@@ -596,7 +662,7 @@ func (m *AppState) handleBack() (tea.Model, tea.Cmd) {
 	m.CurrentPath = parent
 	m.Cursor = 0
 	m.PreviewActive = false
-	return m, m.loadDirectory
+	return m, m.loadDirectory()
 }
 
 // HandlePaste 處理貼上操作（公開版本）
@@ -641,61 +707,43 @@ func (m *AppState) handlePaste() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	return m, m.loadDirectory
+	return m, m.loadDirectory()
 }
 
 // loadDirectory 載入目前目錄的檔案列表
 // 這是一個非同步命令，載入完成後會發送目錄載入完成的訊息
 // 使用 Lazy Load 策略：先快速顯示，再非同步載入詳細資訊
-func (m *AppState) loadDirectory() tea.Msg {
-	// 首先快速載入目錄名稱（延遲載入策略）
-	entries, err := fs.LazyReadDirectory(m.CurrentPath)
-	if err != nil {
-		m.ErrorMessage = "Error loading directory: " + err.Error()
-		return nil
+func (m *AppState) loadDirectory() tea.Cmd {
+	m.loadID++
+	id, path := m.loadID, m.CurrentPath
+	// 載入期間清除舊項目，避免新路徑下仍能操作上一個目錄的檔案。
+	m.Entries = nil
+	m.Cursor = 0
+	m.PreviewActive = false
+	m.GitInfo = nil
+	m.OriginalEntries = nil
+	m.SearchResults = nil
+	m.SearchQuery = ""
+	return func() tea.Msg {
+		entries, err := fs.LazyReadDirectory(path)
+		return directoryLoadedMsg{id: id, path: path, entries: entries, err: err}
 	}
-
-	m.Entries = entries
-
-	// 回傳一個非同步命令來載入詳細資訊（大小、權限等）
-	// 這讓 UI 可以立即顯示目錄，然後在背景載入詳細資訊
-	return m.loadMetadata
 }
 
 // loadMetadata 非同步載入檔案的詳細資訊（大小、權限等）
-func (m *AppState) loadMetadata() tea.Msg {
-	entries, err := fs.ReadDirectory(m.CurrentPath)
-	if err != nil {
-		// 載入失敗，但目錄已顯示，這裡不顯示錯誤
-		return nil
+func loadMetadata(path string, id uint64) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := fs.ReadDirectory(path)
+		return metadataLoadedMsg{id: id, path: path, entries: entries, err: err}
 	}
-
-	// 更新現有的項目（保留已選擇的項目）
-	for i := range m.Entries {
-		if i < len(entries) {
-			m.Entries[i].Size = entries[i].Size
-			m.Entries[i].Mode = entries[i].Mode
-			m.Entries[i].IsSymlink = entries[i].IsSymlink
-			m.Entries[i].SymlinkPath = entries[i].SymlinkPath
-			m.Entries[i].IsBroken = entries[i].IsBroken
-			m.Entries[i].Permission = entries[i].Permission
-		}
-	}
-
-	// 載入 Git 資訊（在背景執行，不阻塞 UI）
-	m.loadGitInfo()
-
-	return nil
 }
 
 // loadGitInfo 載入 Git 資訊
-func (m *AppState) loadGitInfo() {
-	info, err := git.GetGitInfo(m.CurrentPath)
-	if err != nil {
-		// Git 載入失敗不是嚴重錯誤，只是沒有狀態顯示
-		return
+func loadGitInfo(path string, id uint64) tea.Cmd {
+	return func() tea.Msg {
+		info, err := git.GetGitInfo(path)
+		return gitLoadedMsg{id: id, path: path, info: info, err: err}
 	}
-	m.GitInfo = info
 }
 
 // View 回傳目前狀態的 UI 渲染結果

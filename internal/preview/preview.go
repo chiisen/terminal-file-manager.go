@@ -6,6 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -163,16 +166,14 @@ func getTextPreview(path string, info os.FileInfo) (*PreviewResult, error) {
 	}
 	defer file.Close()
 
-	// 讀取檔案內容（最多 4KB）
-	buf := make([]byte, 4096)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
+	// 多讀最多一個 UTF-8 字元，避免預覽上限切斷中文或 emoji。
+	buf, err := io.ReadAll(io.LimitReader(file, 65536+utf8.UTFMax))
+	if err != nil {
 		return nil, err
 	}
-	buf = buf[:n]
 
 	// 檢查是否為文字檔
-	if !isText(buf) {
+	if !isText(utf8Prefix(buf, 4096)) {
 		return &PreviewResult{
 			Content: fmt.Sprintf("[Binary File]\nFile: %s\nSize: %s\nType: %s",
 				info.Name(),
@@ -183,19 +184,10 @@ func getTextPreview(path string, info os.FileInfo) (*PreviewResult, error) {
 		}, nil
 	}
 
-	// 讀取完整內容用於預覽（最多 64KB）
-	previewSize := int64(65536)
-	if info.Size() < previewSize {
-		previewSize = info.Size()
+	previewBuf := utf8Prefix(buf, 65536)
+	if !utf8.Valid(previewBuf) {
+		return &PreviewResult{Content: "[Binary File]", IsText: true, IsBinary: true}, nil
 	}
-
-	previewBuf := make([]byte, previewSize)
-	file.Seek(0, 0)
-	n, err = file.Read(previewBuf)
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
-	previewBuf = previewBuf[:n]
 
 	// 移除控制字元
 	content := cleanControlChars(string(previewBuf))
@@ -209,39 +201,51 @@ func getTextPreview(path string, info os.FileInfo) (*PreviewResult, error) {
 	}, nil
 }
 
+// 只在有後續資料時修剪邊界，不掩蓋檔案本身無效的 UTF-8。
+func utf8Prefix(buf []byte, limit int) []byte {
+	if len(buf) <= limit {
+		return buf
+	}
+	end := limit
+	for end > 0 && limit-end < utf8.UTFMax-1 && !utf8.RuneStart(buf[end]) {
+		end--
+	}
+	if !utf8.RuneStart(buf[end]) {
+		return buf[:limit]
+	}
+	return buf[:end]
+}
+
 // isText 檢查是否為文字檔
 func isText(buf []byte) bool {
 	if len(buf) == 0 {
 		return true
 	}
 
-	// 檢查是否包含 NULL 字元
-	for _, b := range buf {
-		if b == 0 {
+	if !utf8.Valid(buf) {
+		return false
+	}
+	printable, total := 0, 0
+	for _, r := range string(buf) {
+		if r == 0 {
 			return false
 		}
-	}
-
-	// 計算可列印字元的比例
-	printable := 0
-	for _, b := range buf {
-		if (b >= 32 && b <= 126) || b == '\n' || b == '\r' || b == '\t' {
+		total++
+		if !unicode.IsControl(r) || r == '\n' || r == '\r' || r == '\t' {
 			printable++
 		}
 	}
-
-	return float64(printable)/float64(len(buf)) > 0.8
+	return float64(printable)/float64(total) > 0.8
 }
 
 // cleanControlChars 移除控制字元
 func cleanControlChars(s string) string {
-	result := make([]byte, 0, len(s))
-	for _, c := range s {
-		if c >= 32 || c == '\n' || c == '\r' || c == '\t' {
-			result = append(result, byte(c))
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
+			return -1
 		}
-	}
-	return string(result)
+		return r
+	}, s)
 }
 
 // toLower 轉換字串為小寫
