@@ -1,7 +1,9 @@
 package remote
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path"
 
@@ -126,27 +128,38 @@ func (c *RemoteClient) ReadDirectory(dirPath string) ([]types.FileEntry, error) 
 	return result, nil
 }
 
-// Get 取得檔案內容
+// Get 取得小檔案內容；大檔案請使用 Download 串流到檔案或其他 writer。
 func (c *RemoteClient) Get(remotePath string) ([]byte, error) {
-	file, err := c.client.Open(remotePath)
-	if err != nil {
+	var content bytes.Buffer
+	if _, err := c.Download(remotePath, &content); err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	return content.Bytes(), nil
+}
 
-	// 讀取檔案內容
-	buf := make([]byte, 32*1024) // 32KB buffer
-	var result []byte
-	for {
-		n, err := file.Read(buf)
-		if n > 0 {
-			result = append(result, buf[:n]...)
-		}
-		if err != nil {
-			break
-		}
+// Download 串流下載，不累積完整內容；回傳已寫入的 byte 數與讀取／寫入錯誤。
+func (c *RemoteClient) Download(remotePath string, dst io.Writer) (written int64, err error) {
+	if c == nil || c.client == nil {
+		return 0, fmt.Errorf("SFTP 尚未連線")
 	}
-	return result, nil
+	if dst == nil {
+		return 0, fmt.Errorf("下載目的 writer 不可為 nil")
+	}
+	file, err := c.client.Open(remotePath)
+	if err != nil {
+		return 0, fmt.Errorf("無法開啟遠端檔案 %s: %w", remotePath, err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("關閉遠端檔案 %s 失敗: %w", remotePath, closeErr)
+		}
+	}()
+	// 隱藏 WriterTo／ReaderFrom 快速路徑，固定以 32KB buffer 順序讀取與寫出。
+	written, err = io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{file}, make([]byte, 32*1024))
+	if err != nil {
+		return written, fmt.Errorf("下載 %s 失敗（已寫入 %d bytes）: %w", remotePath, written, err)
+	}
+	return written, nil
 }
 
 // Put 上傳檔案

@@ -29,7 +29,7 @@
 ### 進階功能
 - **Git 整合** - 顯示 Git 倉庫變更狀態 (M modified, A added, D deleted)
 - **外掛系統** - 支援自訂外掛 (`~/.config/gofm/plugins`)
-- **遠端檔案** - SSH/SFTP 遠端檔案系統支援
+- **遠端套件（尚未接入 TUI）** - `internal/remote` 提供 SSH/SFTP 目錄讀取、檔案操作及串流下載 API；目前命令列入口僅瀏覽本機路徑。
 - **Lazy Load** - 目錄快速載入，非同步載入詳細資訊
 
 ### 錯誤處理
@@ -54,6 +54,15 @@ go build -o gofm ./cmd/gofm
 ./gofm /var/www
 ./gofm ~/Documents
 ```
+
+## 遠端功能現況
+
+遠端能力目前供專案內 Go 程式呼叫 `remote.NewRemoteClient` 使用，TUI 尚未提供連線入口；`gofm user@host:/path` 目前不能作為遠端瀏覽指令。
+
+- `Get(remotePath)` 回傳完整小檔案內容；讀取中斷會回傳錯誤，不會把部分內容當作成功。
+- `Download(remotePath, writer)` 串流寫入目的地，回傳已寫入的 byte 數與錯誤。下載大檔時可傳入本機檔案 writer，避免把整份內容保留在記憶體中。
+- 寫入失敗或連線中斷時，writer 可能已有部分內容；呼叫端應依錯誤決定重試或清理。
+- SSH 主機金鑰驗證仍是 `docs/OPEN_QUESTIONS.md` 的獨立待辦；完整遠端 TUI 整合不在這次修正範圍。
 
 ## 快捷鍵
 
