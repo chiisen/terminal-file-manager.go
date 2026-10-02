@@ -380,6 +380,7 @@ func (m *AppState) handleConfirmDeleteMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc": // 退出搜尋
+		m.hidePreview()
 		m.Entries = m.OriginalEntries
 		m.OriginalEntries = nil
 		m.SearchQuery = ""
@@ -387,11 +388,26 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Mode = ModeNormal
 		m.Cursor = 0
 
-	case "enter": // 確認搜尋，停留在搜尋結果
-		if len(m.SearchResults) > 0 && m.Cursor < len(m.SearchResults) {
-			// 移動到第一個搜尋結果
-			m.Cursor = 0
+	case "enter": // 確認目前結果，還原完整列表後開啟同一路徑。
+		if m.Cursor < 0 || m.Cursor >= len(m.Entries) {
+			m.StatusMessage = "No matching files"
+			return m, nil
 		}
+		path := m.Entries[m.Cursor].Path
+		m.Entries = m.OriginalEntries
+		m.OriginalEntries = nil
+		m.SearchQuery = ""
+		m.SearchResults = nil
+		m.Mode = ModeNormal
+		m.hidePreview()
+		for i, entry := range m.Entries {
+			if entry.Path == path {
+				m.Cursor = i
+				return m.handleOpen()
+			}
+		}
+		m.Cursor = 0
+		return m, nil
 
 	case "backspace": // 刪除字元
 		if len(m.SearchQuery) > 0 {
@@ -407,7 +423,7 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "down": // 在搜尋結果中移動
-		if m.Cursor < len(m.SearchResults)-1 {
+		if m.Cursor < len(m.Entries)-1 {
 			m.Cursor++
 			m.hidePreview()
 		}
@@ -425,6 +441,7 @@ func (m *AppState) handleSearchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // performSearch 執行 fuzzy search
 func (m *AppState) performSearch() {
 	m.hidePreview()
+	m.Cursor = 0
 	if m.SearchQuery == "" {
 		m.SearchResults = nil
 		m.Entries = m.OriginalEntries
@@ -828,7 +845,7 @@ func (m *AppState) View() string {
 			statusBar = fmt.Sprintf("Delete %s? [y/n]", m.Entries[m.Cursor].Name)
 		}
 	case ModeSearch:
-		resultCount := len(m.SearchResults)
+		resultCount := len(m.Entries)
 		statusBar = fmt.Sprintf("Search: %s_%s", m.SearchQuery, fmt.Sprintf(" [%d results, ↑/↓ to move, Enter to select, Esc to exit]", resultCount))
 	}
 
