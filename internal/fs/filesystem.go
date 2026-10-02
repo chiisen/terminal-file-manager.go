@@ -255,8 +255,7 @@ func SortEntries(entries []types.FileEntry, sortBy string) {
 			return entries[i].Size < entries[j].Size
 		})
 	case "modified":
-		// 需要讀取修改時間，這裡簡化處理
-		fallthrough
+		SortByModified(entries, true)
 	default:
 		// 預設按名稱排序
 		sort.Slice(entries, func(i, j int) bool {
@@ -266,6 +265,26 @@ func SortEntries(entries []types.FileEntry, sortBy string) {
 			return entries[i].Name < entries[j].Name
 		})
 	}
+}
+
+// SortByModified 依修改時間排序，目錄優先；未知時間置後，同時間以名稱穩定排序。
+func SortByModified(entries []types.FileEntry, ascending bool) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.IsDir != b.IsDir {
+			return a.IsDir
+		}
+		if a.ModTime.IsZero() != b.ModTime.IsZero() {
+			return !a.ModTime.IsZero()
+		}
+		if a.ModTime.Equal(b.ModTime) {
+			return a.Name < b.Name
+		}
+		if ascending {
+			return a.ModTime.Before(b.ModTime)
+		}
+		return a.ModTime.After(b.ModTime)
+	})
 }
 
 // FileExists 檢查指定路徑的檔案或目錄是否存在

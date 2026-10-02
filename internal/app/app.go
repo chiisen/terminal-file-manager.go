@@ -529,8 +529,7 @@ func (m *AppState) SortEntries() {
 			return ext1 > ext2
 		})
 	case "modified":
-		// 需要讀取修改時間，這裡暫時按名稱排序
-		fallthrough
+		fs.SortByModified(entries, m.SortAsc)
 	default:
 		sort.SliceStable(entries, func(i, j int) bool {
 			if entries[i].IsDir != entries[j].IsDir {

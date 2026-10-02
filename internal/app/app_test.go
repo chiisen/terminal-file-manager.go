@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gofm/internal/types"
 )
@@ -76,19 +77,25 @@ func TestSortEntries_NilSafe(t *testing.T) {
 	m.SortEntries()
 }
 
-func TestSortEntries_ModifiedFallsBackToName(t *testing.T) {
-	// 💡 現況：modified 尚未實作，fallthrough 用名稱排序（見 docs/OPEN_QUESTIONS.md 項 4）
-	// 此測試鎖定目前行為，實作真排序時需同步更新
-	m := New(t.TempDir())
-	m.SortBy = "modified"
-	m.SortAsc = true
-	m.Entries = []types.FileEntry{
-		{Name: "b.txt"},
-		{Name: "a.txt"},
-	}
-	m.SortEntries()
-	if m.Entries[0].Name != "a.txt" || m.Entries[1].Name != "b.txt" {
-		t.Errorf("modified 暫代行為應為名稱升序，got %q,%q", m.Entries[0].Name, m.Entries[1].Name)
+func TestSortEntries_ModifiedUsesTimeAndUnknownLast(t *testing.T) {
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := old.Add(time.Hour)
+	for _, tc := range []struct {
+		asc  bool
+		want []string
+	}{
+		{true, []string{"dir", "z-old", "a-new", "b-new", "unknown"}},
+		{false, []string{"dir", "a-new", "b-new", "z-old", "unknown"}},
+	} {
+		m := New(t.TempDir())
+		m.SortBy, m.SortAsc = "modified", tc.asc
+		m.Entries = []types.FileEntry{{Name: "unknown"}, {Name: "b-new", ModTime: newer}, {Name: "z-old", ModTime: old}, {Name: "dir", IsDir: true}, {Name: "a-new", ModTime: newer}}
+		m.SortEntries()
+		for i, want := range tc.want {
+			if m.Entries[i].Name != want {
+				t.Fatalf("asc=%v index=%d got=%q want=%q", tc.asc, i, m.Entries[i].Name, want)
+			}
+		}
 	}
 }
 

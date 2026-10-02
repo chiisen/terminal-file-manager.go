@@ -20,8 +20,8 @@
 - 實測：排序 name asc ~9.8ms / size desc ~9.2ms；視窗化渲染 ~0.086ms（目標 navigation < 16ms ✅）；全量 10k 渲染 ~1.48s（ pathological case，實際 UI 只畫可見列，不影響）。
 - 待辦：進 CI（`go test -bench=. -run=^$`）即結案。
 
-## 4. 排序 `modified` 實作（P3）
+## 4. 排序 `modified` 實作（P3）✅ 已完成
 
-- 現況：`internal/app/app.go` 的 `SortEntries()` 在 `modified` 時 `fallthrough` 用名稱排序（暫代）。
-- 待決定：是否改為讀 `FileEntry.ModTime` 真排序？Lazy load 下 ModTime 可能為零值的處理策略？
-- 影響：按修改時間排序目前名不副實。
+- `internal/app` 與 `internal/fs` 共用 `SortByModified`，依 `FileEntry.ModTime` 實作升降序。
+- 目錄優先；未知時間在各群組內置後；相同時間以名稱升序排列。
+- 單元測試涵蓋升降序、零值與相同時間；以真實檔案時間驗證載入後排序（#6）。
