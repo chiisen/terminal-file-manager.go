@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 
@@ -29,6 +31,16 @@ const clearScreen = "\033[2J"
 // ══════════════════════════════════════════════════════════════════════════════
 
 func main() {
+	settings, err := parseOptions(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Print(usage)
+		return
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
 	// 初始化日誌系統
 	if err := logger.Init(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize logger: %v\n", err)
@@ -36,15 +48,16 @@ func main() {
 	defer logger.Close()
 
 	// 決定起始目錄（優先使用命令列參數，否則使用目前目錄）
-	startPath := "."
-	if len(os.Args) > 1 {
-		startPath = os.Args[1]
+	model := app.New(settings.startPath)
+	if settings.remote != nil {
+		model = app.NewRemote(*settings.remote, settings.remoteDir, settings.downloadDir)
 	}
+	defer model.Close()
 
 	// 初始化應用程式
 	// tea.WithAltScreen() 切換到替代螢幕緩衝區，實現全螢幕效果
 	p := tea.NewProgram(
-		app.New(startPath),
+		model,
 		tea.WithAltScreen(),
 	)
 
@@ -53,6 +66,8 @@ func main() {
 		// 發生錯誤時，印出訊息並記錄日誌
 		logger.Error("Application error: %v", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		model.Close()
+		logger.Close()
 		os.Exit(1)
 	}
 }

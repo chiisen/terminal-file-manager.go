@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -101,6 +102,7 @@ type AppState struct {
 	operationBusy               bool
 	operationProgress           string
 	keymap                      *input.Keymap
+	remote                      *remoteState
 }
 
 // 背景命令只回傳資料，所有畫面狀態由 Update 在事件迴圈內更新。
@@ -159,6 +161,9 @@ func (m *AppState) SetMode(mode AppMode) {
 // Init 是 Bubble Tea 的生命週期方法
 // 用於初始化程式並回傳初始命令（通常是 nil，表示不執行額外命令）
 func (m *AppState) Init() tea.Cmd {
+	if m.remote != nil {
+		return m.connectRemote()
+	}
 	// 載入目錄內容
 	return m.loadDirectory()
 }
@@ -167,6 +172,10 @@ func (m *AppState) Init() tea.Cmd {
 // 參數 msg 是發生的事件（如鍵盤輸入）
 func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case remoteConnectedMsg:
+		return m, m.applyRemoteConnection(msg)
+	case remoteDownloadedMsg:
+		m.applyRemoteDownload(msg)
 	case previewLoadedMsg:
 		m.applyPreview(msg)
 	case operationFinishedMsg:
@@ -177,13 +186,23 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.ErrorMessage = "Error loading directory: " + msg.err.Error()
+			if m.remote != nil {
+				m.StatusMessage = "Remote read failed; Ctrl+R to reconnect"
+			}
 			return m, nil
 		}
 		m.Entries = msg.entries
+		if m.remote != nil {
+			m.ErrorMessage = ""
+			m.StatusMessage = "Remote directory loaded"
+		}
 		m.SortEntries()
 		if m.Mode == ModeSearch {
 			m.OriginalEntries = m.Entries
 			m.performSearch()
+		}
+		if m.remote != nil {
+			return m, nil
 		}
 		return m, loadMetadata(msg.path, msg.id)
 	case metadataLoadedMsg:
@@ -226,6 +245,9 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = msg.Width
 		m.Height = msg.Height
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m.quit()
+		}
 		m.ErrorMessage = ""
 
 		switch m.Mode {
@@ -244,10 +266,25 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleNormalMode 處理一般導航模式的鍵盤輸入
 func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.remote != nil {
+		switch msg.String() {
+		case "ctrl+d":
+			return m, m.downloadRemote()
+		case "ctrl+r":
+			return m, m.connectRemote()
+		}
+	}
 	if m.keymap == nil {
 		m.keymap = input.DefaultKeymap()
 	}
 	key := m.keymap.NormalKey(msg.String())
+	if m.remote != nil {
+		switch key {
+		case "d", "r", "p", "a", "A", "x", "y":
+			m.ErrorMessage = "Remote mode supports browse and Ctrl+D download only"
+			return m, nil
+		}
+	}
 	if m.operationBusy {
 		switch key {
 		case "d", "r", "p", "a", "A":
@@ -256,7 +293,7 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch key {
 	case "ctrl+c", "q", "Q":
-		return m, tea.Quit
+		return m.quit()
 
 	case "esc":
 		if m.PreviewActive {
@@ -618,6 +655,10 @@ func getExt(filename string) string {
 
 // handleInputSubmit 處理輸入模式下的 Enter 鍵
 func (m *AppState) handleInputSubmit() (tea.Model, tea.Cmd) {
+	if m.remote != nil {
+		m.Mode = ModeNormal
+		return m, nil
+	}
 	if m.operationBusy {
 		return m, nil
 	}
@@ -652,6 +693,10 @@ func (m *AppState) handleInputSubmit() (tea.Model, tea.Cmd) {
 
 // handleDeleteConfirm 處理確認刪除
 func (m *AppState) handleDeleteConfirm() (tea.Model, tea.Cmd) {
+	if m.remote != nil {
+		m.Mode = ModeNormal
+		return m, nil
+	}
 	if m.operationBusy {
 		return m, nil
 	}
@@ -686,6 +731,10 @@ func (m *AppState) handleOpen() (tea.Model, tea.Cmd) {
 		m.hidePreview()
 		return m, m.loadDirectory()
 	}
+	if m.remote != nil {
+		m.StatusMessage = "Ctrl+D: download selected file to " + m.remote.downloadDir
+		return m, nil
+	}
 
 	// 如果是檔案，啟動預覽並顯示訊息
 	m.StatusMessage = "Previewing: " + entry.Name
@@ -700,6 +749,9 @@ func (m *AppState) HandleBack() (tea.Model, tea.Cmd) {
 // handleBack 返回上一層目錄
 func (m *AppState) handleBack() (tea.Model, tea.Cmd) {
 	parent := fs.GetParentDirectory(m.CurrentPath)
+	if m.remote != nil {
+		parent = path.Dir(m.CurrentPath)
+	}
 
 	// 確保不會超出根目錄
 	if parent == m.CurrentPath {
@@ -720,6 +772,10 @@ func (m *AppState) HandlePaste() (tea.Model, tea.Cmd) {
 
 // handlePaste 處理貼上操作
 func (m *AppState) handlePaste() (tea.Model, tea.Cmd) {
+	if m.remote != nil {
+		m.ErrorMessage = "Remote uploads are not supported"
+		return m, nil
+	}
 	if m.operationBusy {
 		return m, nil
 	}
@@ -763,6 +819,17 @@ func (m *AppState) loadDirectory() tea.Cmd {
 	m.OriginalEntries = nil
 	m.SearchResults = nil
 	m.SearchQuery = ""
+	if m.remote != nil {
+		client := m.remote.client
+		if client == nil {
+			return m.connectRemote()
+		}
+		m.StatusMessage = "Reading remote directory..."
+		return m.remote.work.command(func() tea.Msg {
+			entries, err := client.ReadDirectory(path)
+			return directoryLoadedMsg{id: id, path: path, entries: entries, err: err}
+		})
+	}
 	return func() tea.Msg {
 		entries, err := fs.LazyReadDirectory(path)
 		return directoryLoadedMsg{id: id, path: path, entries: entries, err: err}
@@ -841,6 +908,9 @@ func (m *AppState) View() string {
 	} else {
 		previewContent = "Preview\n\nSelect a file\nto preview"
 	}
+	if m.remote != nil {
+		previewContent = "Remote SFTP\n\nEnter: open directory\nCtrl+D: download selected file\nCtrl+R: reconnect / refresh\n\nDownload directory:\n" + m.remote.downloadDir
+	}
 	previewPanel := ui.RenderPreview(previewContent, previewWidth, bodyHeight, m.previewOffset)
 	mainContent := fileList
 	if wide {
@@ -862,6 +932,9 @@ func (m *AppState) View() string {
 		if m.PreviewActive {
 			statusBar = fmt.Sprintf("↑↓: nav  Esc: close  PgUp/PgDn: scroll  %s: quit", km.Quit)
 		}
+		if m.remote != nil {
+			statusBar = fmt.Sprintf("Ctrl+D: download  Ctrl+R: reconnect  %s: quit  %s/%s: nav  %s: open  %s: parent  /: search  s/S: sort", km.Quit, km.Up, km.Down, km.Open, km.Back)
+		}
 	case ModeInput:
 		switch m.StatusMessage {
 		case "newfile":
@@ -882,7 +955,11 @@ func (m *AppState) View() string {
 
 	var rows []string
 	if headerRows > 0 {
-		rows = append(rows, ui.RenderPathBar(m.CurrentPath+gitStatusInfo, m.Width))
+		pathLabel := m.CurrentPath + gitStatusInfo
+		if m.remote != nil {
+			pathLabel = m.remotePathLabel()
+		}
+		rows = append(rows, ui.RenderPathBar(pathLabel, m.Width))
 	}
 	if bodyHeight > 0 {
 		rows = append(rows, ui.FitBlock(mainContent, m.Width, bodyHeight))

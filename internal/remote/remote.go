@@ -2,13 +2,16 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode"
 
 	"gofm/internal/types"
 
@@ -35,13 +38,19 @@ type Config struct {
 
 // RemoteClient SFTP 客戶端
 type RemoteClient struct {
-	config *Config
-	client *sftp.Client
-	ssh    *ssh.Client
+	config     *Config
+	client     *sftp.Client
+	ssh        *ssh.Client
+	stopCancel func() bool
 }
 
 // NewRemoteClient 建立遠端客戶端
 func NewRemoteClient(config *Config) (*RemoteClient, error) {
+	return NewRemoteClientContext(context.Background(), config)
+}
+
+// NewRemoteClientContext 連線及握手可取消；context 取消也會關閉已建立的 session。
+func NewRemoteClientContext(ctx context.Context, config *Config) (*RemoteClient, error) {
 	if config == nil || config.Host == "" || config.User == "" {
 		return nil, fmt.Errorf("SSH 主機與使用者不可為空")
 	}
@@ -101,27 +110,58 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 
 	// 連接到 SSH 伺服器
 	addr := net.JoinHostPort(config.Host, config.Port)
-	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
+	conn, err := (&net.Dialer{Timeout: 15 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("無法連接到 SSH 伺服器: %w", err)
 	}
+	stopCancel := context.AfterFunc(ctx, func() { conn.Close() })
+	connected := false
+	defer func() {
+		if !connected {
+			stopCancel()
+			conn.Close()
+		}
+	}()
+	conn.SetDeadline(time.Now().Add(15 * time.Second))
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, addr, sshConfig)
+	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return nil, fmt.Errorf("無法連接到 SSH 伺服器: %w", err)
+	}
+	sshClient := ssh.NewClient(sshConn, channels, requests)
 
 	// 建立 SFTP 客戶端
 	sftpClient, err := sftp.NewClient(sshClient)
 	if err != nil {
 		sshClient.Close()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		return nil, fmt.Errorf("無法建立 SFTP 客戶端: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		sftpClient.Close()
+		sshClient.Close()
+		return nil, err
+	}
+	conn.SetDeadline(time.Time{})
+	connected = true
 
 	return &RemoteClient{
-		config: config,
-		client: sftpClient,
-		ssh:    sshClient,
+		config:     config,
+		client:     sftpClient,
+		ssh:        sshClient,
+		stopCancel: stopCancel,
 	}, nil
 }
 
 // Close 關閉連線
 func (c *RemoteClient) Close() error {
+	if c.stopCancel != nil {
+		c.stopCancel()
+	}
 	if c.client != nil {
 		c.client.Close()
 	}
@@ -144,11 +184,12 @@ func (c *RemoteClient) ReadDirectory(dirPath string) ([]types.FileEntry, error) 
 		// 💡 注意：遠端一律是 POSIX 路徑，必須用 path.Join；
 		// filepath.Join 在 Windows 會產生反斜線，導致遠端路徑錯誤
 		result = append(result, types.FileEntry{
-			Name:  entry.Name(),
-			Path:  path.Join(dirPath, entry.Name()),
-			Size:  entry.Size(),
-			IsDir: entry.IsDir(),
-			Mode:  entry.Mode().String(),
+			Name:    entry.Name(),
+			Path:    path.Join(dirPath, entry.Name()),
+			Size:    entry.Size(),
+			ModTime: entry.ModTime(),
+			IsDir:   entry.IsDir(),
+			Mode:    entry.Mode().String(),
 		})
 	}
 
@@ -243,13 +284,29 @@ func ParseRemotePath(remotePath string) (user, host, remoteDir string, err error
 	}
 
 	user = parts[0]
-	hostParts := splitAtFirst(parts[1], ":")
+	hostPart := parts[1]
+	var hostParts []string
+	if strings.HasPrefix(hostPart, "[") {
+		end := strings.Index(hostPart, "]:")
+		if end < 0 {
+			return "", "", "", fmt.Errorf("無效的 IPv6 主機格式")
+		}
+		hostParts = []string{hostPart[1:end], hostPart[end+2:]}
+		if net.ParseIP(hostParts[0]) == nil {
+			return "", "", "", fmt.Errorf("無效的 IPv6 主機")
+		}
+	} else {
+		hostParts = splitAtFirst(hostPart, ":")
+	}
 	if len(hostParts) != 2 {
 		return "", "", "", fmt.Errorf("無效的主機:路徑格式: %s", remotePath)
 	}
 
 	host = hostParts[0]
 	remoteDir = hostParts[1]
+	if user == "" || host == "" || remoteDir == "" || strings.ContainsAny(user, "@:/\\") || strings.ContainsAny(host, "@/\\[]") || strings.ContainsFunc(user+host+remoteDir, unicode.IsControl) || strings.ContainsFunc(user+host, unicode.IsSpace) {
+		return "", "", "", fmt.Errorf("遠端路徑的使用者、主機與路徑不可為空或包含無效字元")
+	}
 
 	// 確保路徑以 / 開頭
 	if !path.IsAbs(remoteDir) {

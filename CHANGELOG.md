@@ -4,6 +4,7 @@
 
 ### 新增
 
+- 新增 SSH/SFTP TUI 入口與埠、私鑰、known_hosts、下載目錄旗標；背景瀏覽、重連與串流下載，完整下載後發布且不覆寫目的檔。取消握手／傳輸並等待暫存清理，補真實 SSH 金鑰認證整合與慢速事件測試（#13）。
 - 將自訂鍵位設定接入 TUI 的既有操作入口；輸入模式保留字元輸入，衝突／無效設定回退預設，狀態列顯示有效鍵位，固定方向鍵、Enter 與 Ctrl+C（#11）。
 - `internal/input/keymap.go`：實作 `config.toml` 的 `[keymap]` 解析（`LoadKeymapFromPath`，標準函式庫、無新依賴）。
 - 核心單元測試：`internal/app/app_test.go`、`internal/state/state_test.go`、`internal/ui/components_test.go`、`internal/remote/remote_test.go`、`internal/input/keymap_test.go`。

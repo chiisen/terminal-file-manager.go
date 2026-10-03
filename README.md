@@ -29,7 +29,7 @@
 ### 進階功能
 - **Git 整合** - 顯示 Git 倉庫變更狀態 (M modified, A added, D deleted)
 - **外掛介面（尚未接入 TUI）** - 提供程式內註冊及示範外掛；`~/.config/gofm/plugins` 目前只建立及列出目錄，不載入外掛。後續程序協定見 [設計決策](docs/PLUGIN_DESIGN.md)。
-- **遠端套件（尚未接入 TUI）** - `internal/remote` 提供 SSH/SFTP 目錄讀取、檔案操作及串流下載 API；目前命令列入口僅瀏覽本機路徑。
+- **SSH/SFTP 遠端瀏覽** - 透過 `--remote` 使用私鑰與 known_hosts 連線，背景瀏覽目錄並串流下載至本機。
 - **Lazy Load** - 目錄快速載入，非同步載入詳細資訊
 
 ### 錯誤處理
@@ -55,14 +55,35 @@ go build -o gofm ./cmd/gofm
 ./gofm ~/Documents
 ```
 
-## 遠端功能現況
+## 遠端瀏覽與下載
 
-遠端能力目前供專案內 Go 程式呼叫 `remote.NewRemoteClient` 使用，TUI 尚未提供連線入口；`gofm user@host:/path` 目前不能作為遠端瀏覽指令。
+```powershell
+# Windows PowerShell；路徑含空白時加上引號
+.\gofm.exe --remote sam@example.com:/home/sam --key "$env:USERPROFILE\.ssh\id_ed25519" --download-dir "D:\Downloads"
+
+# 非預設埠與指定主機驗證檔案
+.\gofm.exe --remote sam@example.com:/data --port 2222 --key "D:\Keys\id_ed25519" --known-hosts "D:\Keys\known_hosts"
+```
+
+```bash
+./gofm --remote sam@example.com:/home/sam --key ~/.ssh/id_ed25519 --download-dir ~/Downloads
+# IPv6 主機使用中括號
+./gofm --remote 'sam@[::1]:/' --key ~/.ssh/id_ed25519
+```
+
+`--port` 預設 22；`--known-hosts` 預設 `~/.ssh/known_hosts`；`--download-dir` 預設目前工作目錄，須已存在。必須指定 `--key`；目前 CLI 不提供密碼、SSH agent 或加密私鑰解鎖入口。遠端旗標放在參數前；本機模式維持 `gofm [目錄]`。
+
+- Enter 開啟遠端目錄，←／h 返回上層；選取檔案按 Ctrl+D 下載，Ctrl+R 重連並刷新目前目錄。搜尋、排序與自訂導航鍵位可用，Ctrl+C 在所有模式皆可退出。
+- 連線、讀取及下載背景執行，顯示執行中／完成／錯誤；慢速網路期間仍可導航及調整視窗。退出取消 session 並等待下載暫存清理。
+- 下載先寫唯一暫存檔，完整關閉後才發布，不覆寫既有目的檔；失敗會清理暫存並顯示原因。目的檔案系統須支援同目錄 hard link（如 NTFS、一般 Linux 本機檔案系統）；不支援時會拒絕發布，並清理暫存。包含 Windows 裝置名或不安全字元的檔名會拒絕下載。
+- 本次遠端模式支援瀏覽與單檔下載；上傳、修改與遠端預覽尚未提供。遠端不執行本機 metadata／Git 讀取。
+
+專案內 Go 程式也可使用 `remote.NewRemoteClient`／`NewRemoteClientContext`：
 
 - `Get(remotePath)` 回傳完整小檔案內容；讀取中斷會回傳錯誤，不會把部分內容當作成功。
 - `Download(remotePath, writer)` 串流寫入目的地，回傳已寫入的 byte 數與錯誤。下載大檔時可傳入本機檔案 writer，避免把整份內容保留在記憶體中。
 - 寫入失敗或連線中斷時，writer 可能已有部分內容；呼叫端應依錯誤決定重試或清理。
-- SSH 主機金鑰驗證仍是 `docs/OPEN_QUESTIONS.md` 的獨立待辦；完整遠端 TUI 整合不在這次修正範圍。
+- `DownloadToDirectory(client, remotePath, localDir)` 提供上述暫存清理與不覆寫發布行為。
 
 ## 快捷鍵
 
@@ -130,11 +151,12 @@ go test -cover ./...
 | fs | 81.6% |
 | logger | 80.0% |
 | plugin | 78.6% |
-| input | 49.1% |
-| app | 78.3% |
-| remote | 44.7% |
+| input | 60.3% |
+| app | 83.2% |
+| remote | 70.3% |
+| cmd/gofm | 60.9% |
 
-> 註：以 `go test -cover ./...`（go1.26.1）量測。部分 UI 分支、鍵位配置與 SSH 握手尚未全部覆蓋；非同步載入、檔案操作、搜尋、Unicode 與 SFTP 串流錯誤等情境已有回歸測試。
+> 註：以 `go test -cover ./...`（go1.26.1）量測。部分 UI、設定解析與錯誤分支尚未全部覆蓋；非同步載入、操作、搜尋、Unicode、自訂鍵位、SSH 握手取消及 SFTP 串流／TUI 整合已有回歸測試。
 
 ## 效能目標
 
