@@ -9,6 +9,7 @@ import (
 
 	"gofm/internal/fs"
 	"gofm/internal/git"
+	"gofm/internal/input"
 	"gofm/internal/preview"
 	"gofm/internal/types"
 	"gofm/internal/ui"
@@ -99,6 +100,7 @@ type AppState struct {
 	operationID                 uint64
 	operationBusy               bool
 	operationProgress           string
+	keymap                      *input.Keymap
 }
 
 // 背景命令只回傳資料，所有畫面狀態由 Update 在事件迴圈內更新。
@@ -145,6 +147,7 @@ func New(startPath string) *AppState {
 		SortBy:        "name",
 		SortAsc:       true,
 		PreviewActive: false,
+		keymap:        input.LoadKeymap(),
 	}
 }
 
@@ -241,13 +244,17 @@ func (m *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleNormalMode 處理一般導航模式的鍵盤輸入
 func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.keymap == nil {
+		m.keymap = input.DefaultKeymap()
+	}
+	key := m.keymap.NormalKey(msg.String())
 	if m.operationBusy {
-		switch msg.String() {
+		switch key {
 		case "d", "r", "p", "a", "A":
 			return m, nil
 		}
 	}
-	switch msg.String() {
+	switch key {
 	case "ctrl+c", "q", "Q":
 		return m, tea.Quit
 
@@ -847,9 +854,13 @@ func (m *AppState) View() string {
 	switch m.Mode {
 	case ModeNormal:
 		sortIndicator := fmt.Sprintf(" [%s %s]", m.SortBy, map[bool]string{true: "↑", false: "↓"}[m.SortAsc])
-		statusBar = "↑↓/kj: nav  Enter: open  h: parent  q: quit  /: search  y/x/p: files  d/r: edit  a/A: new  s/S: sort" + sortIndicator
+		km := m.keymap
+		if km == nil {
+			km = input.DefaultKeymap()
+		}
+		statusBar = km.Help() + sortIndicator
 		if m.PreviewActive {
-			statusBar = "↑↓: nav  Esc: close  PgUp/PgDn: scroll  q: quit"
+			statusBar = fmt.Sprintf("↑↓: nav  Esc: close  PgUp/PgDn: scroll  %s: quit", km.Quit)
 		}
 	case ModeInput:
 		switch m.StatusMessage {

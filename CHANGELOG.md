@@ -4,6 +4,7 @@
 
 ### 新增
 
+- 將自訂鍵位設定接入 TUI 的既有操作入口；輸入模式保留字元輸入，衝突／無效設定回退預設，狀態列顯示有效鍵位，固定方向鍵、Enter 與 Ctrl+C（#11）。
 - `internal/input/keymap.go`：實作 `config.toml` 的 `[keymap]` 解析（`LoadKeymapFromPath`，標準函式庫、無新依賴）。
 - 核心單元測試：`internal/app/app_test.go`、`internal/state/state_test.go`、`internal/ui/components_test.go`、`internal/remote/remote_test.go`、`internal/input/keymap_test.go`。
 - 新增 `docs/OPEN_QUESTIONS.md`（HostKey 驗證、外掛載入、效能基準、`modified` 排序四項開放問題）。

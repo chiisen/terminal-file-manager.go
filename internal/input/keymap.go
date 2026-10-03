@@ -5,8 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"gofm/internal/app"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -77,6 +76,28 @@ func DefaultKeymap() *Keymap {
 // 參數 key 是按鍵字串
 // 回傳對應的動作
 func (km *Keymap) HandleKey(key string) KeyAction {
+	// 固定安全入口優先，別名只在對應設定維持預設時啟用。
+	switch key {
+	case "ctrl+c":
+		return ActionQuit
+	case "up":
+		return ActionUp
+	case "down":
+		return ActionDown
+	case "enter", "right":
+		return ActionOpen
+	case "left":
+		return ActionBack
+	}
+	if key == "k" && km.Up == "up" {
+		return ActionUp
+	}
+	if key == "j" && km.Down == "down" {
+		return ActionDown
+	}
+	if key == "Q" && km.Quit == "q" {
+		return ActionQuit
+	}
 	switch key {
 	case "up", km.Up:
 		return ActionUp
@@ -109,69 +130,6 @@ func (km *Keymap) HandleKey(key string) KeyAction {
 	}
 }
 
-// ApplyAction 根據動作執行對應的操作
-// 參數 m 是目前的 AppState
-// 回傳更新後的 Model 和 Command
-func (km *Keymap) ApplyAction(m *app.AppState, action KeyAction) (tea.Model, tea.Cmd) {
-	switch action {
-	case ActionUp:
-		if m.Cursor > 0 {
-			m.Cursor--
-		}
-	case ActionDown:
-		if m.Cursor < len(m.Entries)-1 {
-			m.Cursor++
-		}
-	case ActionOpen:
-		return m.HandleOpen()
-	case ActionBack:
-		return m.HandleBack()
-	case ActionDelete:
-		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			m.SetMode(app.ModeConfirmDelete)
-		}
-	case ActionRename:
-		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			m.SetMode(app.ModeInput)
-			m.InputBuffer = m.Entries[m.Cursor].Name
-		}
-	case ActionCopy:
-		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			m.Clipboard = m.Entries[m.Cursor].Path
-			m.IsCut = false
-			m.StatusMessage = "Copied: " + m.Entries[m.Cursor].Name
-		}
-	case ActionCut:
-		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			m.Clipboard = m.Entries[m.Cursor].Path
-			m.IsCut = true
-			m.StatusMessage = "Cut: " + m.Entries[m.Cursor].Name
-		}
-	case ActionPaste:
-		return m.HandlePaste()
-	case ActionNewFile:
-		m.SetMode(app.ModeInput)
-		m.InputBuffer = ""
-		m.StatusMessage = "newfile"
-	case ActionNewDir:
-		m.SetMode(app.ModeInput)
-		m.InputBuffer = ""
-		m.StatusMessage = "newdir"
-	case ActionQuit:
-		return m, tea.Quit
-	case ActionSelect:
-		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			path := m.Entries[m.Cursor].Path
-			if m.Selected[path] {
-				delete(m.Selected, path)
-			} else {
-				m.Selected[path] = true
-			}
-		}
-	}
-	return m, nil
-}
-
 // LoadKeymap 從配置檔載入鍵位映射
 // 說明：讀取 ~/.config/gofm/config.toml 的 [keymap] 區段，未指定或缺檔時用預設值
 // 為何如此：避免缺檔或格式錯誤導致當機，保證鍵盤操作永遠可用
@@ -202,7 +160,57 @@ func LoadKeymapFromPath(path string) *Keymap {
 	// 解析 [keymap] 區段並覆寫預設值
 	overrides := parseKeymapTOML(string(data))
 	applyKeymapOverrides(km, overrides)
+	if !km.valid() {
+		return DefaultKeymap()
+	}
 	return km
+}
+
+// 有衝突或無效設定時整份退回預設，避免某個操作無法抵達。
+func (km *Keymap) valid() bool {
+	keys := []string{km.Up, km.Down, km.Open, km.Back, km.Delete, km.Rename, km.Copy, km.Cut, km.Paste, km.NewFile, km.NewDir, km.Quit, km.Select}
+	owners := map[string]int{"up": 0, "k": 0, "down": 1, "j": 1, "enter": 2, "right": 2, "left": 3, "ctrl+c": 11, "Q": 11}
+	for i, key := range keys {
+		if key == "esc" || key == "pgup" || key == "pgdown" || key == "/" || key == "s" || key == "S" {
+			return false
+		}
+		if owner, ok := owners[key]; ok && owner != i {
+			return false
+		}
+		owners[key] = i
+		if runes := []rune(key); len(runes) == 1 && unicode.IsPrint(runes[0]) {
+			continue
+		}
+		known := false
+		for code := tea.KeyF20; code <= tea.KeyType(127); code++ {
+			if (tea.KeyMsg{Type: code}).String() == key {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return false
+		}
+	}
+	return true
+}
+
+// NormalKey 將設定映射成 app 的既有操作入口，避免重複實作檔案操作。
+func (km *Keymap) NormalKey(key string) string {
+	canonical := map[KeyAction]string{ActionUp: "up", ActionDown: "down", ActionOpen: "enter", ActionBack: "left", ActionDelete: "d", ActionRename: "r", ActionCopy: "y", ActionCut: "x", ActionPaste: "p", ActionNewFile: "a", ActionNewDir: "A", ActionQuit: "ctrl+c", ActionSelect: " "}
+	if action := km.HandleKey(key); action != "" {
+		return canonical[action]
+	}
+	switch key {
+	case "esc", "pgup", "pgdown", "/", "s", "S":
+		return key
+	}
+	return ""
+}
+
+// Help 使用實際有效設定顯示一般模式快捷鍵。
+func (km *Keymap) Help() string {
+	return fmt.Sprintf("%s/%s: nav  %s: open  %s: parent  %s: quit  /: search  %s/%s/%s: files  %s/%s: edit  %s/%s: new  s/S: sort", km.Up, km.Down, km.Open, km.Back, km.Quit, km.Copy, km.Cut, km.Paste, km.Delete, km.Rename, km.NewFile, km.NewDir)
 }
 
 // parseKeymapTOML 解析 TOML 文字中的 [keymap] 區段

@@ -151,6 +151,20 @@ go test -cover ./...
 - **Styling**: [Lip Gloss](https://github.com/charmbracelet/lipgloss)
 - **SSH/SFTP**: [golang.org/x/crypto/ssh](https://pkg.go.dev/golang.org/x/crypto/ssh), [github.com/pkg/sftp](https://github.com/pkg/sftp)
 
+## 自訂鍵位
+
+啟動時讀取 `~/.config/gofm/config.toml` 的 `[keymap]`，例如：
+
+```toml
+[keymap]
+down = "n"
+copy = "c"
+rename = "e"
+quit = "z"
+```
+
+可設定 `up/down/open/back/delete/rename/copy/cut/paste/newfile/newdir/quit/select`，未指定者沿用預設；使用 Bubble Tea 按鍵名稱或單一可列印字元。任一鍵位無效或衝突時整份退回預設。方向鍵、Enter、Ctrl+C 固定可用；Esc、PageUp/PageDown、`/`、`s/S` 保留既有用途。預設 `j/k/Q` 別名亦保留，不能改派其他動作。自訂鍵位只作用於一般模式；搜尋／文字編輯仍輸入字元，Enter 確認、Esc 取消。狀態列顯示有效設定。
+
 ## SSH 主機驗證
 
 `internal/remote.Config` 預設讀取使用者家目錄下的 `.ssh/known_hosts`；可用 `KnownHostsPath` 指定另一份驗證檔案。連線前請透過可信管道確認伺服器指紋，再以 SSH 工具建立對應紀錄。未知或已變更的金鑰、缺少或無法解析的驗證檔案均會拒絕連線，不會自動加入或略過驗證。非預設埠使用 `[host]:port` 的 known_hosts 紀錄。
