@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"gofm/internal/fs"
@@ -13,6 +14,7 @@ import (
 	"gofm/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -90,6 +92,7 @@ type AppState struct {
 	previewID                   uint64
 	previewPath, previewContent string
 	previewLoading              bool
+	previewOffset               int
 	previewCacheEntry           types.FileEntry
 	previewCacheContent         string
 	previewCacheValid           bool
@@ -251,6 +254,18 @@ func (m *AppState) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		if m.PreviewActive {
 			m.hidePreview()
+		}
+	case "pgup", "pgdown":
+		if m.PreviewActive {
+			width, height := m.previewSize()
+			limit := ui.PreviewMaxOffset(m.previewContent, width, height)
+			m.previewOffset = min(m.previewOffset, limit)
+			page := max(1, height-2)
+			if msg.String() == "pgup" {
+				m.previewOffset = max(0, m.previewOffset-page)
+			} else {
+				m.previewOffset = min(limit, m.previewOffset+page)
+			}
 		}
 
 	// 檔案導航
@@ -766,9 +781,9 @@ func loadGitInfo(path string, id uint64) tea.Cmd {
 // View 回傳目前狀態的 UI 渲染結果
 // 這個方法會在每次狀態更新後被呼叫
 func (m *AppState) View() string {
-	// 自動填滿視窗：計算可用寬度
-	// 路徑列使用完整寬度
-	pathBar := ui.RenderPathBar(m.CurrentPath, m.Width)
+	if m.Width <= 0 || m.Height <= 0 {
+		return ""
+	}
 
 	// 如果是 Git 倉庫，添加 Git 狀態資訊
 	var gitStatusInfo string
@@ -785,24 +800,23 @@ func (m *AppState) View() string {
 		}
 	}
 
-	// 自動填滿視窗：計算檔案列表和預覽區域的寬度
-	// 預覽區域佔 40%，檔案列表佔 60%
-	previewWidth := m.Width * 40 / 100
-	if previewWidth < 30 {
-		previewWidth = 30 // 最小寬度
+	// 先保留狀態列，再依剩餘列數配置 header、訊息與主要面板。
+	headerRows, noticeRows, bodyHeight := m.viewRows()
+	var notice string
+	if m.operationBusy {
+		notice = ui.RenderStatusMessage(m.operationProgress)
+	} else if m.ErrorMessage != "" {
+		notice = ui.RenderError(m.ErrorMessage)
+	} else if m.Mode == ModeNormal && m.StatusMessage != "" && m.StatusMessage != "newfile" && m.StatusMessage != "newdir" {
+		notice = ui.RenderStatusMessage(m.StatusMessage)
 	}
-	fileListWidth := m.Width - previewWidth - 1 // -1 為分隔線
-	if fileListWidth < 30 {
-		fileListWidth = 30
+	wide := m.Width >= 70 && bodyHeight >= 3
+	previewWidth, fileListWidth := m.Width, m.Width
+	if wide {
+		previewWidth = m.Width * 40 / 100
+		fileListWidth = m.Width - previewWidth - 1
 	}
-
-	// 渲染檔案列表
-	var fileList string
-	if len(m.Entries) == 0 {
-		fileList = "(empty directory)"
-	} else {
-		fileList = ui.RenderFileList(m.Entries, m.Cursor, m.Selected, fileListWidth, m.Height)
-	}
+	fileList := ui.RenderFilePanel(m.Entries, m.Cursor, m.Selected, fileListWidth, bodyHeight)
 
 	// 渲染預覽面板
 	var previewContent string
@@ -820,50 +834,51 @@ func (m *AppState) View() string {
 	} else {
 		previewContent = "Preview\n\nSelect a file\nto preview"
 	}
-	preview := ui.PreviewStyle.Render(previewContent)
-
-	// 組合主要區域
-	mainContent := fmt.Sprintf("%s\n%s", fileList, preview)
+	previewPanel := ui.RenderPreview(previewContent, previewWidth, bodyHeight, m.previewOffset)
+	mainContent := fileList
+	if wide {
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, fileList, ui.FitBlock("", 1, bodyHeight), previewPanel)
+	} else if m.PreviewActive {
+		mainContent = previewPanel
+	}
 
 	// 底部狀態列
 	var statusBar string
 	switch m.Mode {
 	case ModeNormal:
 		sortIndicator := fmt.Sprintf(" [%s %s]", m.SortBy, map[bool]string{true: "↑", false: "↓"}[m.SortAsc])
-		statusBar = "↑↓/kj: nav  Enter/l: open  ←/h: parent  space: select  d: delete  r: rename  y: copy  x: cut  p: paste  a: new file  A: new dir  /: search  s: sort order  S: sort by" + sortIndicator + "  ctrl+c: quit"
+		statusBar = "↑↓/kj: nav  Enter: open  h: parent  q: quit  /: search  y/x/p: files  d/r: edit  a/A: new  s/S: sort" + sortIndicator
+		if m.PreviewActive {
+			statusBar = "↑↓: nav  Esc: close  PgUp/PgDn: scroll  q: quit"
+		}
 	case ModeInput:
 		switch m.StatusMessage {
 		case "newfile":
-			statusBar = "New File - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
+			statusBar = ui.InputStatus("New", m.InputBuffer, "Enter: save  Esc: cancel", m.Width)
 		case "newdir":
-			statusBar = "New Directory - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
+			statusBar = ui.InputStatus("Dir", m.InputBuffer, "Enter: save  Esc: cancel", m.Width)
 		default:
-			statusBar = "Rename - Enter: confirm  Esc: cancel  |  Input: " + m.InputBuffer + "_"
+			statusBar = ui.InputStatus("Rename", m.InputBuffer, "Enter: save  Esc: cancel", m.Width)
 		}
 	case ModeConfirmDelete:
 		if m.Cursor >= 0 && m.Cursor < len(m.Entries) {
-			statusBar = fmt.Sprintf("Delete %s? [y/n]", m.Entries[m.Cursor].Name)
+			statusBar = "Delete? [y/n] " + m.Entries[m.Cursor].Name
 		}
 	case ModeSearch:
 		resultCount := len(m.Entries)
-		statusBar = fmt.Sprintf("Search: %s_%s", m.SearchQuery, fmt.Sprintf(" [%d results, ↑/↓ to move, Enter to select, Esc to exit]", resultCount))
+		statusBar = ui.InputStatus("Search", m.SearchQuery, fmt.Sprintf("%d results  ↑↓  Enter: open  Esc: cancel", resultCount), m.Width)
 	}
 
-	// 組合輸出
-	output := pathBar + gitStatusInfo + "\n\n"
-	output += mainContent + "\n\n"
-	output += ui.RenderStatusBar(statusBar, m.Width)
-
-	// 顯示錯誤/狀態訊息
-	if m.ErrorMessage != "" {
-		output += "\n" + ui.RenderError(m.ErrorMessage)
+	var rows []string
+	if headerRows > 0 {
+		rows = append(rows, ui.RenderPathBar(m.CurrentPath+gitStatusInfo, m.Width))
 	}
-	if m.StatusMessage != "" && m.Mode == ModeNormal && m.StatusMessage != "newfile" && m.StatusMessage != "newdir" {
-		output += "\n" + ui.RenderStatusMessage(m.StatusMessage)
+	if bodyHeight > 0 {
+		rows = append(rows, ui.FitBlock(mainContent, m.Width, bodyHeight))
 	}
-	if m.operationBusy {
-		output += "\n" + ui.RenderStatusMessage(m.operationProgress)
+	if noticeRows > 0 {
+		rows = append(rows, ui.FitText(notice, m.Width))
 	}
-
-	return output
+	rows = append(rows, ui.RenderStatusBar(statusBar, m.Width))
+	return ui.FitBlock(strings.Join(rows, "\n"), m.Width, m.Height)
 }

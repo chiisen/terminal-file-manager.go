@@ -30,6 +30,7 @@ func (m *AppState) hidePreview() {
 	m.previewLoading = false
 	m.previewContent = ""
 	m.previewPath = ""
+	m.previewOffset = 0
 }
 
 // 單份快取有固定記憶體上限；路徑、大小與修改時間共同辨識預覽版本。
@@ -39,6 +40,7 @@ func (m *AppState) startPreview(entry types.FileEntry, read func(string) (*previ
 	m.PreviewActive = true
 	m.previewPath = entry.Path
 	m.previewContent = ""
+	m.previewOffset = 0
 	if m.previewCacheValid && m.previewCacheEntry.Path == entry.Path && m.previewCacheEntry.Size == entry.Size && m.previewCacheEntry.ModTime.Equal(entry.ModTime) {
 		m.previewLoading = false
 		m.previewContent = m.previewCacheContent

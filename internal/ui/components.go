@@ -2,11 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gofm/internal/types"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -77,45 +79,30 @@ var (
 // 參數 height 是可用高度
 // 回傳渲染後的字串
 func RenderFileList(entries []types.FileEntry, cursor int, selected map[string]bool, width int, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
 	if len(entries) == 0 {
-		return "(empty directory)"
+		return FitText("(empty directory)", width)
 	}
-
-	// 計算可顯示的起始位置（滾動邏輯）
-	start := 0
-	if len(entries) > height-4 { // 預留標題列和狀態列的空間
-		// 讓游標保持在畫面中央
-		start = cursor - height/2
-		if start < 0 {
-			start = 0
-		}
-		if start+height-4 > len(entries) {
-			start = len(entries) - height + 4
-			if start < 0 {
-				start = 0
-			}
-		}
-	}
-
-	// 計算結束位置
-	end := start + height - 4
-	if end > len(entries) {
-		end = len(entries)
-	}
-
-	output := ""
+	// height 為真正可用列數；即使只有一列，也必須顯示目前游標。
+	cursor = max(0, min(cursor, len(entries)-1))
+	start := max(0, cursor-height/2)
+	start = min(start, max(0, len(entries)-height))
+	end := min(start+height, len(entries))
+	var output strings.Builder
 	for i := start; i < end; i++ {
 		entry := entries[i]
 		// 決定前綴與游標（放大版）
-		prefix := "   "
+		prefix := "  "
 		if i == cursor {
-			prefix = " ▶ "
+			prefix = "▶ "
 		} else if selected[entry.Path] {
-			prefix = " ✓ " // 選取標記
+			prefix = "✓ " // 選取標記
 		}
 
 		// 決定圖示與基本樣式
-		icon := " 📄 "
+		icon := "📄 "
 		var lineStyle lipgloss.Style
 		isSelected := selected[entry.Path]
 		if i == cursor {
@@ -133,7 +120,7 @@ func RenderFileList(entries []types.FileEntry, cursor int, selected map[string]b
 		}
 
 		if entry.IsDir {
-			icon = " 📁 "
+			icon = "📁 "
 		}
 
 		// 檔案大小和時間格式化
@@ -143,66 +130,48 @@ func RenderFileList(entries []types.FileEntry, cursor int, selected map[string]b
 			sizeStr = FormatSize(entry.Size)
 		}
 
-		// 排版計算：確保檔名過長時會被截斷，並讓 Size 和 Time 欄位靠右對齊
-		maxNameLen := width - 40 // 預留給圖示、游標、Size、Time、Padding 的空間（放大版）
-		if maxNameLen < 10 {
-			maxNameLen = 10
+		// 按終端 cell 寬度排版，窄視窗逐步隱藏時間、大小與圖示。
+		padding := 0
+		if width >= 3 {
+			padding = 1
 		}
-
-		nameStr := entry.Name
-		if len(nameStr) > maxNameLen {
-			nameStr = nameStr[:maxNameLen-3] + "..."
+		innerWidth := width - 2*padding
+		if innerWidth < 8 {
+			icon = ""
 		}
-
-		// %-*s 保證檔名區塊寬度固定，讓後方的 sizeStr 和 timeStr 能整齊切齊
-		line := fmt.Sprintf("%s%s %-*s %10s %8s", prefix, icon, maxNameLen, nameStr, sizeStr, timeStr)
-
-		// 若為選取狀態，讓背景色能覆蓋整行寬度
-		if i == cursor || isSelected {
-			output += lineStyle.Width(width).Render(line) + "\n"
-		} else {
-			output += lineStyle.Render(line) + "\n"
+		var suffix string
+		if innerWidth >= 36 {
+			suffix = " " + padLeft(FitText(sizeStr, 10), 10) + " " + padLeft(timeStr, 10)
+		} else if innerWidth >= 24 {
+			suffix = " " + padLeft(FitText(sizeStr, 10), 10)
 		}
+		nameWidth := max(0, innerWidth-ansi.StringWidth(prefix+icon+suffix))
+		name := FitText(singleLine(entry.Name), nameWidth)
+		line := prefix + icon + name + strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name))) + suffix
+		line = ansi.Truncate(line, innerWidth, "")
+		if i > start {
+			output.WriteByte('\n')
+		}
+		output.WriteString(lineStyle.Padding(0, padding).Width(width).MaxWidth(width).MaxHeight(1).Render(line))
 	}
-
-	return output
+	return output.String()
 }
 
 // RenderPathBar 渲染路徑列
 // 自動填滿視窗：使用 width 參數來決定顯示寬度
 func RenderPathBar(path string, width int) string {
-	// 確保最小寬度
-	if width < 10 {
-		width = 10
+	path = singleLine(path)
+	available := width - 8 // PATH: 與左右 padding。
+	if available >= 3 && ansi.StringWidth(path) > available {
+		path = FitTail(path, available)
 	}
-	text := "PATH: " + path
-	if len(text) > width {
-		// 從右側開始顯示，保留空間給 "PATH: "
-		pathStart := len("PATH: ")
-		availablePathWidth := width - pathStart - 3 // 3 個點
-		if availablePathWidth > 0 {
-			text = "PATH: ..." + path[len(path)-availablePathWidth:]
-		} else {
-			text = "PATH:"
-		}
-	}
-	// 使用 Width() 確保填滿整行
-	return PathBarStyle.Width(width).Render(text)
+	return renderBar(PathBarStyle, "PATH: "+path, width)
 }
 
 // RenderStatusBar 渲染狀態列
 // 自動填滿視窗：使用 width 參數來決定顯示寬度
 func RenderStatusBar(message string, width int) string {
-	// 確保最小寬度
-	if width < 10 {
-		width = 10
-	}
-	text := message
-	if len(text) > width {
-		text = text[:width-3] + "..."
-	}
-	// 使用 Width() 確保填滿整行
-	return StatusBarStyle.Width(width).Render(text)
+	return renderBar(StatusBarStyle, singleLine(message), width)
 }
 
 // RenderError 渲染錯誤訊息
@@ -210,7 +179,7 @@ func RenderError(err string) string {
 	if err == "" {
 		return ""
 	}
-	return ErrorStyle.Render("[ERROR] " + err)
+	return ErrorStyle.Render("[ERROR] " + singleLine(err))
 }
 
 // RenderStatusMessage 渲染狀態訊息
@@ -218,7 +187,7 @@ func RenderStatusMessage(msg string) string {
 	if msg == "" {
 		return ""
 	}
-	return StatusMessageStyle.Render(msg)
+	return StatusMessageStyle.Render(singleLine(msg))
 }
 
 // FormatSize 格式化檔案大小
@@ -237,6 +206,9 @@ func FormatSize(size int64) string {
 
 // FormatTime 格式化時間顯示
 func FormatTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
 	now := time.Now()
 
 	// 如果是今天的檔案，顯示時間

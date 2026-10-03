@@ -80,9 +80,13 @@ go build -o gofm ./cmd/gofm
 | a | 新增檔案 |
 | A | 新增目錄 |
 | / | 搜尋 |
+| PageUp / PageDown | 捲動預覽 |
+| Esc | 關閉預覽／取消輸入或搜尋 |
 | s | 切換排序方向 |
 | S | 切換排序方式 |
 | q | 離開 |
+
+寬視窗以左右面板顯示列表與預覽；窄視窗顯示單一面板，Enter 開啟預覽後可按 Esc 返回列表。面板、通知與快捷鍵列會依視窗尺寸調整。
 
 ## 專案架構
 
@@ -121,16 +125,16 @@ go test -cover ./...
 | types | 100.0% |
 | state | 100.0% |
 | git | 84.8% |
-| preview | 81.2% |
-| ui | 81.0% |
-| fs | 80.2% |
+| preview | 80.4% |
+| ui | 63.6% |
+| fs | 81.6% |
 | logger | 80.0% |
 | plugin | 78.6% |
 | input | 49.1% |
-| app | 29.5% |
-| remote | 28.1% |
+| app | 78.3% |
+| remote | 44.7% |
 
-> 註：以 `go test -cover ./...`（go1.26.1）量測；app/input/remote 偏低主因是 Bubble Tea 互動迴圈與 SSH 實連需外部環境，純邏輯皆已覆蓋。
+> 註：以 `go test -cover ./...`（go1.26.1）量測。部分 UI 分支、鍵位配置與 SSH 握手尚未全部覆蓋；非同步載入、檔案操作、搜尋、Unicode 與 SFTP 串流錯誤等情境已有回歸測試。
 
 ## 效能目標
 
