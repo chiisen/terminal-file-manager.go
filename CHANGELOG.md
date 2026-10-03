@@ -29,6 +29,7 @@
 
 ### 文件
 
+- 修正 README、TODO 與 PRD 的外掛可用程度；新增外部程序協定設計決策、信任邊界及後續實作驗收，保留動態載入為待辦（#12）。
 - `TODO.md`：`config.toml` 標註完成；`event.go` 條目修正為「已合併至 keymap.go + app.go」。
 - `docs/PRD.md` §8：包結構更新為實作現況（ui/components.go、input/keymap.go 合併說明）。
 - `README.md`：覆蓋率表新增 input/app/state/ui/remote 列（確切數字待跑 `go test -cover ./...` 回填）。

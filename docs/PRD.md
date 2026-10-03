@@ -213,7 +213,7 @@ paste
 
 ### Plugin System
 
-\~/.config/gofm/plugins
+目前僅有程式內介面及示範，`~/.config/gofm/plugins` 不會動態載入外掛，也未接入 TUI。後續採外部程序協定，現況與實作範圍見 [PLUGIN_DESIGN.md](PLUGIN_DESIGN.md)。
 
 ### Remote Filesystem
 

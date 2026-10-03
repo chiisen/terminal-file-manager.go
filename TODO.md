@@ -66,14 +66,16 @@
 
 ---
 
-## Post-MVP ✅ 已完成
+## Post-MVP
 
 - [x] 搜尋功能 (fuzzy search, 高亮結果)
 - [x] 排序功能 (name, size, modified, type)
 - [x] 預覽面板 (文字預覽, 圖片資訊, 二進制資訊)
 - [x] Git 整合 (M modified, A added, D deleted)
-- [x] 外掛系統 (~/.config/gofm/plugins)
-- [x] 遠端檔案系統 (SSH, SFTP)
+- [x] 外掛介面與程式內示範；現況及程序協定設計決策（#12）
+- [ ] 外掛動態載入與 TUI 執行入口（見 docs/PLUGIN_DESIGN.md 後續範圍）
+- [x] SSH/SFTP 套件 API 與串流下載
+- [ ] 遠端瀏覽與下載接入 TUI（#13）
 
 ---
 

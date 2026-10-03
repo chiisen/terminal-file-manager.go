@@ -28,7 +28,7 @@
 
 ### 進階功能
 - **Git 整合** - 顯示 Git 倉庫變更狀態 (M modified, A added, D deleted)
-- **外掛系統** - 支援自訂外掛 (`~/.config/gofm/plugins`)
+- **外掛介面（尚未接入 TUI）** - 提供程式內註冊及示範外掛；`~/.config/gofm/plugins` 目前只建立及列出目錄，不載入外掛。後續程序協定見 [設計決策](docs/PLUGIN_DESIGN.md)。
 - **遠端套件（尚未接入 TUI）** - `internal/remote` 提供 SSH/SFTP 目錄讀取、檔案操作及串流下載 API；目前命令列入口僅瀏覽本機路徑。
 - **Lazy Load** - 目錄快速載入，非同步載入詳細資訊
 
@@ -101,7 +101,7 @@ cmd/gofm/main.go          - 入口點
 ├── input/keymap.go       - 鍵位映射
 ├── preview/preview.go    - 檔案預覽
 ├── git/git.go            - Git 整合
-├── plugin/plugin.go      - 外掛系統
+├── plugin/plugin.go      - 外掛介面與示範（無動態載入）
 ├── remote/remote.go      - SSH/SFTP
 ├── logger/logger.go     - 日誌系統
 ├── state/state.go       - 狀態管理
