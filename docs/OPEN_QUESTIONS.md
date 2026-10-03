@@ -2,11 +2,11 @@
 
 本文件收斂目前已知、尚未決定的開放問題（供 `AI_GITHUB_PROJECT_GUIDE.md` SOP 匯入追蹤）。
 
-## 1. 安全：SSH HostKey 驗證（P1）
+## 1. 安全：SSH HostKey 驗證（P1）✅ 已完成（#10）
 
-- 現況：`internal/remote/remote.go` 使用 `ssh.InsecureIgnoreHostKey()`，僅適合測試/內網。
-- 待決定：是否引入 `known_hosts` 驗證（`golang.org/x/crypto/ssh/knownhosts`）？預設開啟還是用 flag 選擇？
-- 影響：生產環境中間人攻擊風險。
+- 預設使用 `~/.ssh/known_hosts`，可透過 `Config.KnownHostsPath` 指定驗證檔案。
+- 未知、變更或無法讀取的主機金鑰一律拒絕；不提供自動接受或跳過驗證。
+- 以本機真實 SSH/SFTP 握手驗證相符、未知、變更、缺檔與非預設埠情境。
 
 ## 2. 外掛動態載入（P2）
 

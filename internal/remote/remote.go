@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path"
+	"path/filepath"
+	"time"
 
 	"gofm/internal/types"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -21,11 +25,12 @@ import (
 
 // Config SSH 連線配置
 type Config struct {
-	Host     string // 主機地址
-	Port     string // 連接埠 (預設 22)
-	User     string // 使用者名稱
-	Password string // 密碼 (如果使用金鑰認證則為空)
-	KeyPath  string // SSH 金鑰路徑
+	Host           string // 主機地址
+	Port           string // 連接埠 (預設 22)
+	User           string // 使用者名稱
+	Password       string // 密碼 (如果使用金鑰認證則為空)
+	KeyPath        string // SSH 金鑰路徑
+	KnownHostsPath string // 留空使用 ~/.ssh/known_hosts
 }
 
 // RemoteClient SFTP 客戶端
@@ -37,9 +42,27 @@ type RemoteClient struct {
 
 // NewRemoteClient 建立遠端客戶端
 func NewRemoteClient(config *Config) (*RemoteClient, error) {
+	if config == nil || config.Host == "" || config.User == "" {
+		return nil, fmt.Errorf("SSH 主機與使用者不可為空")
+	}
+	// 保留呼叫者設定快照，不修改原始設定。
+	settings := *config
+	config = &settings
 	// 設定預設連接埠
 	if config.Port == "" {
 		config.Port = "22"
+	}
+	knownHostsPath := config.KnownHostsPath
+	if knownHostsPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("無法取得 known_hosts 預設路徑: %w", err)
+		}
+		knownHostsPath = filepath.Join(home, ".ssh", "known_hosts")
+	}
+	verifyHost, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("無法讀取 known_hosts %s: %w", knownHostsPath, err)
 	}
 
 	// 建立 SSH 客戶端
@@ -67,13 +90,17 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	sshConfig := &ssh.ClientConfig{
 		User: config.User,
 		Auth: authMethods,
-		// ⚠️ 注意：InsecureIgnoreHostKey 會跳過主機金鑰驗證，僅適合測試/內網；
-		// 生產環境應改用 known_hosts 驗證的 HostKeyCallback
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: func(host string, addr net.Addr, key ssh.PublicKey) error {
+			if err := verifyHost(host, addr, key); err != nil {
+				return fmt.Errorf("known_hosts 主機金鑰驗證失敗 (%s): %w", host, err)
+			}
+			return nil
+		},
+		Timeout: 15 * time.Second,
 	}
 
 	// 連接到 SSH 伺服器
-	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
+	addr := net.JoinHostPort(config.Host, config.Port)
 	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		return nil, fmt.Errorf("無法連接到 SSH 伺服器: %w", err)
